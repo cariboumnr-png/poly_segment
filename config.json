@@ -1,0 +1,12 @@
+{
+  "mu": 780,
+  "source_folder": "sandbox/input",
+  "source_gdb_name": "segmentation_R1",
+  "source_layer_prefix": "segmented_objects_R1",
+  "object_level_merge": 3,
+  "destination_folder": "sandbox/output",
+  "gdb_version": "dummy_001",
+  "table_version": "dummy_001",
+  "output_format": "filegdb",
+  "overwrite": true
+}
