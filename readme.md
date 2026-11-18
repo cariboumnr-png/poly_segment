@@ -31,15 +31,29 @@ The workflow performs the following operations:
 
 ```text
 project-root/
-├── app/
+├── intersect/                 # Four-layer intersection and neighbour difference analysis
 │   ├── __init__.py
 │   ├── attributes.py
 │   ├── configs.py
 │   ├── executor.py
 │   └── spatial.py
-├── generate_dummy_data.py
-├── dummy_config.json
-├── run_from_config.py
+├── merge/                     # Injectable rule-based polygon layer merging
+│   ├── __init__.py
+│   ├── attributes.py
+│   ├── configs.py
+│   ├── executor.py
+│   ├── rules.py
+│   └── spatial.py
+├── scripts/
+│   └── generate_dummy_data.py
+├── tests/
+│   ├── test_rules.py
+│   ├── test_spatial.py
+│   └── test_workflow.py
+├── config.json                # Intersection workflow configuration
+├── merge_config.json          # Merging workflow configuration
+├── run.py                     # CLI runner for intersection
+├── run_merge.py               # CLI runner for merging
 └── README.md
 ```
 
@@ -278,3 +292,57 @@ The workflow requires:
 File Geodatabase writing through `OpenFileGDB` requires GDAL 3.6 or later.
 GDAL 3.9 or later is recommended when preserving 64-bit integer fields for
 recent ArcGIS Pro versions.
+
+---
+
+# Polygon Merging Module (`merge/`)
+
+The `merge/` module intersects four polygon segmentation levels, evaluates spatial
+neighbours against an **injectable rule set**, and dissolves qualifying adjacent
+polygons into a single output polygon layer.
+
+Public API:
+
+```python
+from merge import MergeConfig, run_merge, DefaultMergeRuleSet, MetricDifferenceRule
+```
+
+### Starting Rule Set
+
+The starting rule set performs a direct absolute difference comparison across six metrics:
+`zq95`, `vci_1m`, and `LMoments (1-4)`. Merging between candidate neighbours $A$ and $B$
+is permitted if and only if:
+
+$$|v_m(A) - v_m(B)| \le c \quad \forall m \in \{\text{zq95}, \text{vci\_1m}, \text{LMoment1}, \text{LMoment2}, \text{LMoment3}, \text{LMoment4}\}$$
+
+where $c$ is a constant threshold (default `0.10`).
+
+### Running the Merge Workflow
+
+Run with JSON configuration:
+
+```bash
+python run_merge.py merge_config.json
+```
+
+Or execute via Python:
+
+```python
+import pathlib
+from merge import MergeConfig, run_merge, DefaultMergeRuleSet
+
+config = MergeConfig(
+    mu=780,
+    source_folder=pathlib.Path("sandbox/input"),
+    source_gdb_name="segmentation_R1",
+    source_layer_prefix="segmented_objects_R1",
+    object_level_merge=3,
+    destination_folder=pathlib.Path("sandbox/output"),
+    gdb_version="merge_001",
+    layer_version="merge_001",
+    threshold=0.10,
+    overwrite=True,
+)
+
+merged_gdf = run_merge(config)
+```

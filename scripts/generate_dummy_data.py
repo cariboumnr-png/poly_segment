@@ -67,6 +67,10 @@ ATTRIBUTE_FIELDS = (
     "Mean_TPI",
     "Mean_vci_1m",
     "Mean_ZQ95",
+    "Mean_LMoment1",
+    "Mean_LMoment2",
+    "Mean_LMoment3",
+    "Mean_LMoment4",
 )
 
 LAYER_GRID_SHAPES = (
@@ -186,6 +190,10 @@ def create_grid(
                     "Mean_TPI": (row - column) * 2.5 + level,
                     "Mean_vci_1m": 0.2 + feature_number * 0.01,
                     "Mean_ZQ95": 15.0 + row * 3.0 + column * 1.5,
+                    "Mean_LMoment1": base_value + 5.0,
+                    "Mean_LMoment2": 1.0 + (row + column) * 0.05,
+                    "Mean_LMoment3": 0.5 + row * 0.02,
+                    "Mean_LMoment4": 0.2 + column * 0.01,
                     "geometry": shapely.geometry.box(
                         x_min,
                         y_min,
