@@ -44,9 +44,11 @@ project-root/
 │   ├── executor.py
 │   ├── rules.py
 │   └── spatial.py
+├── visual/                    # Multi-scale visualization module (plots & interactive HTML)
+│   ├── __init__.py
+│   └── renderer.py
 ├── scripts/
-│   ├── generate_dummy_data.py
-│   └── visualize.py
+│   └── generate_dummy_data.py
 ├── tests/
 │   ├── conftest.py
 │   ├── test_rules.py
@@ -369,10 +371,15 @@ python run_merge.py merge_config.json --metrics zq95,vci_1m --per-metric-thresho
 
 ### Running the Merge Workflow
 
-Run with JSON configuration:
+Run with JSON configuration (automatically performs merging and exports
+comparison PNG graphic and interactive HTML visualizer):
 
 ```bash
+# Execute merge workflow and auto-visualize
 python run_merge.py merge_config.json
+
+# Skip automatic visualization
+python run_merge.py merge_config.json --no-visualize
 ```
 
 Or execute via Python:

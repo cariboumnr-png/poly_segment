@@ -45,6 +45,7 @@ import typing
 # local imports
 from merge import MergeConfig
 from merge import run_merge
+from visual import render_workflow_visualizations
 
 LOGGER = logging.getLogger("poly_segment_merge")
 
@@ -65,15 +66,19 @@ OPTIONAL_FIELDS = {
     "min_shared_length",
     "object_level_merge",
     "output_format",
+    "output_html",
+    "output_image",
     "output_layer_name",
     "overwrite",
     "per_metric_thresholds",
+    "raw_gdb",
     "source_layer",
     "source_layer_name",
     "source_layer_prefix",
     "table_version",
     "threshold",
     "thresholds",
+    "visualize",
 }
 
 SUPPORTED_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
@@ -103,6 +108,36 @@ def parse_args(
         type=pathlib.Path,
         default=DEFAULT_CONFIG_PATH,
         help="JSON configuration file for merging.",
+    )
+    parser.add_argument(
+        "--config",
+        dest="config_flag",
+        type=pathlib.Path,
+        default=None,
+        help="Explicit flag for JSON configuration file.",
+    )
+    parser.add_argument(
+        "--no-visualize",
+        action="store_true",
+        help="Disable automatic generation of comparison PNG and HTML.",
+    )
+    parser.add_argument(
+        "--output-image",
+        type=pathlib.Path,
+        default=None,
+        help="Path to export comparison PNG graphic.",
+    )
+    parser.add_argument(
+        "--output-html",
+        type=pathlib.Path,
+        default=None,
+        help="Path to export interactive HTML visualizer.",
+    )
+    parser.add_argument(
+        "--raw-gdb",
+        type=pathlib.Path,
+        default=None,
+        help="Path to raw input segmentation File Geodatabase.",
     )
     return parser.parse_args(argv)
 
@@ -290,7 +325,8 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
             Optional sequence of command-line argument strings.
     '''
     args = parse_args(argv)
-    config = load_config(args.config)
+    config_path = args.config_flag or args.config
+    config = load_config(config_path)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -298,7 +334,7 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    LOGGER.info("Merge configuration loaded from %s.", args.config.resolve())
+    LOGGER.info("Merge configuration loaded from %s.", config_path.resolve())
     LOGGER.info("Source dataset: %s.", config.source_dataset)
     if config.source_intersection_layer:
         LOGGER.info(
@@ -313,10 +349,47 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
     LOGGER.info("Destination dataset: %s.", config.destination_dataset)
     LOGGER.info("Threshold: %.4f.", config.threshold)
 
-    run_merge(config)
+    merged_gdf = run_merge(config)
+
+    # auto-visualize unless disabled
+    resolved_path = config_path.resolve()
+    with resolved_path.open(encoding="utf-8") as stream:
+        raw_json = json.load(stream)
+
+    visualize = bool(raw_json.get("visualize", True))
+    if args.no_visualize:
+        visualize = False
+
+    if visualize:
+        config_dir = resolved_path.parent
+        raw_gdb = args.raw_gdb or _resolve_optional_path(
+            raw_json.get("raw_gdb"), config_dir
+        )
+        out_png = args.output_image or _resolve_optional_path(
+            raw_json.get("output_image"), config_dir
+        )
+        out_html = args.output_html or _resolve_optional_path(
+            raw_json.get("output_html"), config_dir
+        )
+        render_workflow_visualizations(
+            base_config=config,
+            merged_input=merged_gdf,
+            raw_source_gdb=raw_gdb,
+            output_png=out_png,
+            output_html=out_html,
+        )
 
 
 # ----- private helpers
+def _resolve_optional_path(
+    value: typing.Any,
+    config_dir: pathlib.Path,
+) -> pathlib.Path | None:
+    '''Resolve an optional configuration path relative to config directory.'''
+    if value is None:
+        return None
+    path_val = pathlib.Path(str(value))
+    return path_val if path_val.is_absolute() else config_dir / path_val
 def _resolve_path(
     value: object,
     base_directory: pathlib.Path,

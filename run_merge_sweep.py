@@ -54,8 +54,7 @@ import pyogrio
 from merge import MergeConfig
 from merge import run_merge
 from run_merge import load_config as load_base_merge_config
-from scripts.visualize import generate_interactive_html
-from scripts.visualize import plot_comparison_figure
+from visual import render_workflow_visualizations
 
 LOGGER = logging.getLogger("poly_segment_sweep")
 
@@ -485,9 +484,9 @@ def run_merge_sweep(
 
     # extended multi-panel visualization
     if resolved_vis:
-        _render_sweep_visualizations(
+        render_workflow_visualizations(
             base_config=resolved_base,
-            visual_items=visual_items,
+            merged_input=visual_items,
             raw_source_gdb=resolved_raw,
             output_png=png_path,
             output_html=html_path,
@@ -636,80 +635,6 @@ def _format_trial_badge(trial: SweepTrial) -> str:
         metrics_str = ", ".join(m.upper() for m in trial.metrics)
         return f"{metrics_str} | Tol: {trial.threshold:.2f}"
     return f"All Metrics (6) | Tol: {trial.threshold:.2f}"
-
-
-def _render_sweep_visualizations(
-    base_config: MergeConfig,
-    visual_items: list[tuple[str, geopandas.GeoDataFrame, str]],
-    raw_source_gdb: pathlib.Path | None,
-    output_png: pathlib.Path,
-    output_html: pathlib.Path,
-) -> None:
-    '''Load raw and intersection layers, then render PNG and HTML viewers.'''
-    raw_gdb = raw_source_gdb or DEFAULT_RAW_GDB
-    if not raw_gdb.exists():
-        fallback_cand = base_config.source_folder / "segmentation_R1.gdb"
-        if fallback_cand.exists():
-            raw_gdb = fallback_cand
-
-    if not raw_gdb.exists():
-        LOGGER.warning(
-            "Raw input GDB not found at %s; skipping visual export.",
-            raw_gdb,
-        )
-        return
-
-    LOGGER.info("Loading raw segmentation levels from %s...", raw_gdb)
-    avail_raw = {name for name, _ in pyogrio.list_layers(raw_gdb)}
-    raw_layers: dict[int, geopandas.GeoDataFrame] = {}
-    for lvl in range(1, 5):
-        matched = [
-            n for n in avail_raw
-            if n.endswith(f"_{lvl}") or n == f"level_{lvl}"
-        ]
-        layer_name = matched[0] if matched else f"segmented_objects_R1_{lvl}"
-        raw_layers[lvl] = pyogrio.read_dataframe(raw_gdb, layer=layer_name)
-
-    LOGGER.info(
-        "Loading Stage 1 intersection layer from %s...",
-        base_config.source_dataset,
-    )
-    intersect_layer = base_config.source_intersection_layer
-    if intersect_layer is None:
-        avail = [
-            name for name, _ in pyogrio.list_layers(base_config.source_dataset)
-        ]
-        cands = [n for n in avail if n.startswith("intersected_")]
-        if not cands:
-            LOGGER.warning(
-                "No intersected layer found; skipping visual export."
-            )
-            return
-        intersect_layer = cands[0]
-
-    intersected_gdf = pyogrio.read_dataframe(
-        base_config.source_dataset,
-        layer=intersect_layer,
-    )
-
-    LOGGER.info(
-        "Rendering extended %d-panel comparison figure...",
-        5 + len(visual_items),
-    )
-    plot_comparison_figure(
-        raw_layers=raw_layers,
-        intersected_gdf=intersected_gdf,
-        merged_gdf=visual_items,
-        output_png=output_png,
-    )
-
-    LOGGER.info("Rendering extended interactive HTML viewer...")
-    generate_interactive_html(
-        raw_layers=raw_layers,
-        intersected_gdf=intersected_gdf,
-        merged_gdf=visual_items,
-        output_html=output_html,
-    )
 
 
 if __name__ == "__main__":

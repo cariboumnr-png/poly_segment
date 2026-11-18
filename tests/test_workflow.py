@@ -41,6 +41,7 @@ from run_merge_sweep import SweepConfig
 from run_merge_sweep import SweepTrial
 from run_merge_sweep import load_sweep_config
 from run_merge_sweep import run_merge_sweep
+from visual import render_workflow_visualizations
 
 
 # ----- test cases
@@ -454,3 +455,64 @@ def test_load_sweep_config_json(
         "vci_1m": 0.02,
     }
     assert sweep_cfg.visualize is False
+
+
+def test_render_single_workflow_visualizations(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate single-run workflow visualization export.
+
+    Given:
+        A synthetic Stage 1 and Stage 2 merge output dataset.
+    When:
+        `render_workflow_visualizations` executes on single GeoDataFrame.
+    Then:
+        A 6-panel PNG and interactive HTML viewer are generated.
+    '''
+    tmp_dir, source_gdb = synthetic_data
+    stage1_dest = tmp_dir / "single_vis_stage1"
+
+    intersect_cfg = IntersectConfig(
+        mu=780,
+        source_folder=tmp_dir,
+        source_gdb_name="test_segmentation",
+        source_layer_prefix="segmented_objects",
+        object_level_merge=3,
+        destination_folder=stage1_dest,
+        gdb_version="svis_001",
+        table_version="svis_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+    run_intersect(intersect_cfg)
+
+    merge_cfg = MergeConfig(
+        mu=780,
+        source_folder=stage1_dest,
+        source_gdb_name="isi_mu780_postOBC_intersect_versvis_001",
+        source_layer=intersect_cfg.intersection_layer,
+        destination_folder=tmp_dir / "single_vis_output",
+        gdb_version="svis_001",
+        layer_version="svis_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+    merged_gdf = run_merge(merge_cfg)
+
+    out_png = tmp_dir / "single_vis_output" / "single_vis.png"
+    out_html = tmp_dir / "single_vis_output" / "single_vis.html"
+
+    res_png, res_html = render_workflow_visualizations(
+        base_config=merge_cfg,
+        merged_input=merged_gdf,
+        raw_source_gdb=source_gdb,
+        output_png=out_png,
+        output_html=out_html,
+    )
+
+    assert res_png is not None and res_png.exists()
+    assert res_png.stat().st_size > 0
+    assert res_html is not None and res_html.exists()
+    html_text = res_html.read_text(encoding="utf-8")
+    assert "<svg" in html_text

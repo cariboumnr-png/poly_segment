@@ -30,6 +30,7 @@ Public APIs:
     - `LANDCOVER_COLORS`: Mapping of vegetation classes to hex colors.
     - `plot_comparison_figure`: Render multi-panel comparison graphic.
     - `generate_interactive_html`: Render self-contained HTML viewer.
+    - `render_workflow_visualizations`: Load layers and render both outputs.
     - `parse_args`: Parse command-line arguments.
     - `main`: Entry point for script execution.
 '''
@@ -47,6 +48,8 @@ import typing
 # third-party imports
 import geopandas
 import pyogrio
+# local imports
+from merge import MergeConfig
 
 LOGGER = logging.getLogger("poly_segment_visualize")
 
@@ -255,7 +258,7 @@ def plot_comparison_figure(
     for i in range(total_panels, len(axes_flat)):
         axes_flat[i].set_visible(False)
 
-    for idx, (ax, gdf, title, lvl, show_dense, desc) in enumerate(panels):
+    for _, (ax, gdf, title, lvl, show_dense, desc) in enumerate(panels):
         ax.set_title(title, fontsize=12, fontweight="semibold", pad=8)
         ax.set_aspect("equal")
         ax.set_xticks([])
@@ -296,29 +299,6 @@ def plot_comparison_figure(
                     alpha=0.92,
                 ),
             )
-
-        if idx >= 5:
-            for _, row in gdf.iterrows():
-                centroid = row.geometry.centroid
-                parts = row.get("num_merged_parts", 1)
-                name = row.get("landcover", "Stand")
-                area_ha = row.geometry.area / 10_000.0
-                label = f"{name}\n({parts} merged parts\n{area_ha:.1f} ha)"
-                ax.annotate(
-                    label,
-                    xy=(centroid.x, centroid.y),
-                    ha="center",
-                    va="center",
-                    fontsize=8.0 if len(merge_items) > 1 else 8.5,
-                    fontweight="bold",
-                    color="white",
-                    bbox=dict(
-                        boxstyle="round,pad=0.25",
-                        fc="black",
-                        ec="none",
-                        alpha=0.65,
-                    ),
-                )
 
     legend_patches = [
         matplotlib.patches.Patch(color=col, label=label)
@@ -625,6 +605,105 @@ renderMap();
     with output_html.open("w", encoding="utf-8") as f:
         f.write(html_content)
     LOGGER.info("Interactive HTML visualizer saved to %s", output_html)
+
+
+def render_workflow_visualizations(
+    base_config: MergeConfig,
+    merged_input: (
+        geopandas.GeoDataFrame
+        | dict[str, tuple[geopandas.GeoDataFrame, str]]
+        | list[tuple[str, geopandas.GeoDataFrame, str]]
+    ),
+    raw_source_gdb: pathlib.Path | None = None,
+    output_png: pathlib.Path | None = None,
+    output_html: pathlib.Path | None = None,
+) -> tuple[pathlib.Path | None, pathlib.Path | None]:
+    '''
+    Load raw and intersection layers, then render PNG and HTML viewers.
+
+    Args:
+        base_config:
+            Merge configuration instance providing paths and layer details.
+        merged_input:
+            Single merged GeoDataFrame or list/dict of sweep trial results.
+        raw_source_gdb:
+            Optional path to raw multi-scale segmentation dataset.
+        output_png:
+            Optional target path for exported PNG graphic.
+        output_html:
+            Optional target path for exported interactive HTML.
+
+    Returns:
+        tuple[pathlib.Path | None, pathlib.Path | None]:
+            Tuple of generated PNG and HTML paths, or None if skipped.
+    '''
+    png_path = output_png or DEFAULT_PNG_PATH
+    html_path = output_html or DEFAULT_HTML_PATH
+
+    raw_gdb = raw_source_gdb or DEFAULT_SOURCE_GDB
+    if not raw_gdb.exists():
+        fallback_cand = base_config.source_folder / "segmentation_R1.gdb"
+        if fallback_cand.exists():
+            raw_gdb = fallback_cand
+
+    if not raw_gdb.exists():
+        LOGGER.warning(
+            "Raw input GDB not found at %s; skipping visual export.",
+            raw_gdb,
+        )
+        return None, None
+
+    LOGGER.info("Loading raw segmentation levels from %s...", raw_gdb)
+    avail_raw = {name for name, _ in pyogrio.list_layers(raw_gdb)}
+    raw_layers: dict[int, geopandas.GeoDataFrame] = {}
+    for lvl in range(1, 5):
+        matched = [
+            n for n in avail_raw
+            if n.endswith(f"_{lvl}") or n == f"level_{lvl}"
+        ]
+        layer_name = matched[0] if matched else f"segmented_objects_R1_{lvl}"
+        raw_layers[lvl] = pyogrio.read_dataframe(raw_gdb, layer=layer_name)
+
+    LOGGER.info(
+        "Loading Stage 1 intersection layer from %s...",
+        base_config.source_dataset,
+    )
+    intersect_layer = base_config.source_intersection_layer
+    if intersect_layer is None:
+        avail = [
+            name for name, _ in pyogrio.list_layers(base_config.source_dataset)
+        ]
+        cands = [n for n in avail if n.startswith("intersected_")]
+        if not cands:
+            LOGGER.warning(
+                "No intersected layer found; skipping visual export."
+            )
+            return None, None
+        intersect_layer = cands[0]
+
+    intersected_gdf = pyogrio.read_dataframe(
+        base_config.source_dataset,
+        layer=intersect_layer,
+    )
+
+    merge_items = _normalize_merge_inputs(merged_input)
+    panel_count = 5 + len(merge_items)
+    LOGGER.info("Rendering %d-panel comparison figure...", panel_count)
+    plot_comparison_figure(
+        raw_layers=raw_layers,
+        intersected_gdf=intersected_gdf,
+        merged_gdf=merged_input,
+        output_png=png_path,
+    )
+
+    LOGGER.info("Rendering interactive HTML viewer...")
+    generate_interactive_html(
+        raw_layers=raw_layers,
+        intersected_gdf=intersected_gdf,
+        merged_gdf=merged_input,
+        output_html=html_path,
+    )
+    return png_path, html_path
 
 
 def main(argv: typing.Sequence[str] | None = None) -> None:

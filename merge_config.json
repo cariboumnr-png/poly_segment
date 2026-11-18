@@ -17,5 +17,6 @@
   ],
   "threshold": 0.10,
   "output_format": "filegdb",
-  "overwrite": true
+  "overwrite": true,
+  "visualize": true
 }
