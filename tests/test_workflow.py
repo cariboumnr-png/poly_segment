@@ -99,3 +99,68 @@ def test_merge_workflow_geopackage(synthetic_data):
     merged_gdf = run_merge(config)
     assert not merged_gdf.empty
     assert config.destination_dataset.exists()
+
+
+def test_two_stage_sequential_workflow(synthetic_data):
+    """
+    Given:
+        A 4-layer synthetic source dataset.
+    When:
+        Stage 1 (run_workflow from intersect) produces the intersection layer and neighbour table,
+        and Stage 2 (run_merge from merge) is executed in chained mode directly consuming
+        Stage 1's intersection layer.
+    Then:
+        Stage 2 skips geometric intersection, merges candidate polygons according to the rule set,
+        and safely adds the merged layer to the geodatabase preserving all previous layers.
+    """
+    from intersect import WorkflowConfig as IntersectConfig
+    from intersect import run_workflow as run_intersect
+
+    tmp_dir, _ = synthetic_data
+    stage1_dest = tmp_dir / "output_sequential"
+
+    # Stage 1: Intersect
+    intersect_cfg = IntersectConfig(
+        mu=780,
+        source_folder=tmp_dir,
+        source_gdb_name="test_segmentation",
+        source_layer_prefix="segmented_objects",
+        object_level_merge=3,
+        destination_folder=stage1_dest,
+        gdb_version="seq_001",
+        table_version="seq_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+    run_intersect(intersect_cfg)
+
+    # Verify Stage 1 created expected layers
+    stage1_gdb = intersect_cfg.destination_dataset
+    assert stage1_gdb.exists()
+    layers_after_stage1 = {name for name, _ in pyogrio.list_layers(stage1_gdb)}
+    assert intersect_cfg.intersection_layer in layers_after_stage1
+    assert intersect_cfg.neighbour_table in layers_after_stage1
+
+    # Stage 2: Merge in chained mode consuming Stage 1 output
+    merge_cfg = MergeConfig(
+        mu=780,
+        source_folder=stage1_dest,
+        source_gdb_name="isi_mu780_postOBC_process_verseq_001",
+        source_layer=intersect_cfg.intersection_layer,
+        object_level_merge=3,
+        destination_folder=stage1_dest,
+        gdb_version="seq_001",
+        layer_version="seq_001",
+        threshold=0.10,
+        output_format="filegdb",
+        overwrite=True,
+    )
+    merged_gdf = run_merge(merge_cfg)
+
+    # Verify Stage 2 succeeded and all three layers exist in the same geodatabase
+    assert not merged_gdf.empty
+    layers_after_stage2 = {name for name, _ in pyogrio.list_layers(stage1_gdb)}
+    assert intersect_cfg.intersection_layer in layers_after_stage2
+    assert intersect_cfg.neighbour_table in layers_after_stage2
+    assert merge_cfg.merged_layer in layers_after_stage2
+

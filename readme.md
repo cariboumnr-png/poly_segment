@@ -31,13 +31,13 @@ The workflow performs the following operations:
 
 ```text
 project-root/
-├── intersect/                 # Four-layer intersection and neighbour difference analysis
+├── intersect/                 # Stage 1: Four-layer intersection and neighbour difference analysis
 │   ├── __init__.py
 │   ├── attributes.py
 │   ├── configs.py
 │   ├── executor.py
 │   └── spatial.py
-├── merge/                     # Injectable rule-based polygon layer merging
+├── merge/                     # Stage 2: Injectable rule-based polygon layer merging
 │   ├── __init__.py
 │   ├── attributes.py
 │   ├── configs.py
@@ -47,13 +47,14 @@ project-root/
 ├── scripts/
 │   └── generate_dummy_data.py
 ├── tests/
+│   ├── conftest.py
 │   ├── test_rules.py
 │   ├── test_spatial.py
 │   └── test_workflow.py
-├── config.json                # Intersection workflow configuration
-├── merge_config.json          # Merging workflow configuration
-├── run.py                     # CLI runner for intersection
-├── run_merge.py               # CLI runner for merging
+├── intersect_config.json      # Stage 1: Intersection workflow configuration
+├── merge_config.json          # Stage 2: Merging workflow configuration
+├── run_intersect.py           # CLI runner for Stage 1 (intersect)
+├── run_merge.py               # CLI runner for Stage 2 (merge)
 └── README.md
 ```
 
@@ -331,15 +332,16 @@ Or execute via Python:
 import pathlib
 from merge import MergeConfig, run_merge, DefaultMergeRuleSet
 
+# Stage 2: Directly consumes Stage 1's intersected output
 config = MergeConfig(
     mu=780,
-    source_folder=pathlib.Path("sandbox/input"),
-    source_gdb_name="segmentation_R1",
-    source_layer_prefix="segmented_objects_R1",
+    source_folder=pathlib.Path("sandbox/output"),
+    source_gdb_name="isi_mu780_postOBC_process_verdummy_001",
+    source_layer="intersected_dummy_001",
     object_level_merge=3,
     destination_folder=pathlib.Path("sandbox/output"),
-    gdb_version="merge_001",
-    layer_version="merge_001",
+    gdb_version="dummy_001",
+    layer_version="dummy_001",
     threshold=0.10,
     overwrite=True,
 )

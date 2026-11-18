@@ -19,7 +19,7 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Run the polygon-merging workflow from a JSON configuration file.
+"""Run the Stage 2 polygon-merging workflow from a JSON configuration file.
 
 Relative paths in the JSON document are resolved relative to the JSON file,
 making execution independent of the current working directory.
@@ -32,6 +32,8 @@ Use another configuration file:
 
     python run_merge.py path/to/merge_config.json
 """
+
+from __future__ import annotations
 
 # standard imports
 import argparse
@@ -53,13 +55,15 @@ REQUIRED_FIELDS = {
     "mu",
     "source_folder",
     "source_gdb_name",
+}
+
+OPTIONAL_FIELDS = {
+    "source_layer",
+    "source_layer_name",
     "source_layer_prefix",
     "object_level_merge",
     "destination_folder",
     "gdb_version",
-}
-
-OPTIONAL_FIELDS = {
     "layer_version",
     "table_version",
     "output_layer_name",
@@ -77,7 +81,7 @@ def parse_args(
 ) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run the polygon-merging workflow from JSON."
+        description="Run Stage 2: polygon-merging workflow from JSON."
     )
     parser.add_argument(
         "config",
@@ -133,15 +137,34 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
         config_directory,
         "source_folder",
     )
-    destination_folder = _resolve_path(
-        raw_config["destination_folder"],
-        config_directory,
-        "destination_folder",
+
+    if "destination_folder" in raw_config:
+        destination_folder = _resolve_path(
+            raw_config["destination_folder"],
+            config_directory,
+            "destination_folder",
+        )
+    else:
+        destination_folder = source_folder
+
+    source_layer = raw_config.get(
+        "source_layer",
+        raw_config.get("source_layer_name"),
     )
+    if source_layer is not None:
+        source_layer = _require_string(source_layer, "source_layer")
+
+    source_layer_prefix = raw_config.get("source_layer_prefix")
+    if source_layer_prefix is not None:
+        source_layer_prefix = _require_string(source_layer_prefix, "source_layer_prefix")
 
     layer_version = raw_config.get(
         "layer_version",
-        raw_config.get("table_version", "001"),
+        raw_config.get("table_version", "dummy_001"),
+    )
+    gdb_version = raw_config.get(
+        "gdb_version",
+        raw_config.get("layer_version", "dummy_001"),
     )
 
     output_layer_name = raw_config.get("output_layer_name")
@@ -150,6 +173,7 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
 
     threshold = float(raw_config.get("threshold", 0.10))
     min_shared_length = float(raw_config.get("min_shared_length", 0.0))
+    object_level_merge = int(raw_config.get("object_level_merge", 3))
 
     config = MergeConfig(
         mu=_require_int(raw_config["mu"], "mu"),
@@ -158,23 +182,12 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
             raw_config["source_gdb_name"],
             "source_gdb_name",
         ),
-        source_layer_prefix=_require_string(
-            raw_config["source_layer_prefix"],
-            "source_layer_prefix",
-        ),
-        object_level_merge=_require_int(
-            raw_config["object_level_merge"],
-            "object_level_merge",
-        ),
+        source_layer=source_layer,
+        source_layer_prefix=source_layer_prefix,
+        object_level_merge=object_level_merge,
         destination_folder=destination_folder,
-        gdb_version=_require_string(
-            raw_config["gdb_version"],
-            "gdb_version",
-        ),
-        layer_version=_require_string(
-            layer_version,
-            "layer_version",
-        ),
+        gdb_version=_require_string(gdb_version, "gdb_version"),
+        layer_version=_require_string(layer_version, "layer_version"),
         output_format=_require_string(
             raw_config.get("output_format", "filegdb"),
             "output_format",
@@ -265,7 +278,10 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
 
     LOGGER.info("Merge configuration loaded from %s.", args.config.resolve())
     LOGGER.info("Source dataset: %s.", config.source_dataset)
-    LOGGER.info("Selected source layer: %s.", config.selected_source_layer)
+    if config.source_intersection_layer:
+        LOGGER.info("Pre-intersected layer to merge: %s.", config.source_intersection_layer)
+    else:
+        LOGGER.info("Selected source layer prefix: %s.", config.source_layer_prefix)
     LOGGER.info("Destination dataset: %s.", config.destination_dataset)
     LOGGER.info("Threshold: %.4f.", config.threshold)
 

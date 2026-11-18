@@ -52,16 +52,21 @@ def run_merge(
     config: MergeConfig,
     rule_set: MergeRule | None = None,
 ) -> geopandas.GeoDataFrame:
-    """Execute the complete polygon layer merging workflow.
+    """Execute Stage 2 of the workflow: polygon layer merging.
 
-    1. Validates the environment and source dataset.
-    2. Intersects the four source polygon layers.
-    3. Evaluates neighbour pairs against the injected rule set.
-    4. Merges adjacent qualifying polygons into a single polygon layer.
-    5. Writes the merged layer atomically to the destination dataset.
+    1. In chained mode, loads the pre-intersected layer from Stage 1 output
+       (skipping geometric intersection). In standalone mode, intersects the 4
+       raw input layers.
+    2. Evaluates candidate neighbours against the injected rule set.
+    3. Merges adjacent qualifying polygons into a single polygon layer.
+    4. Writes the merged layer atomically to the destination dataset.
     """
     _validate_environment(config.output_format)
-    validate_source_dataset(config.source_dataset, config.source_layers)
+
+    if not config.source_dataset.exists():
+        raise FileNotFoundError(
+            f"Source dataset does not exist: {config.source_dataset}"
+        )
 
     destination = config.destination_dataset
     layer_name = config.merged_layer
@@ -75,24 +80,50 @@ def run_merge(
                 destination,
             )
             return geopandas.read_file(destination, layer=layer_name)
-        raise FileExistsError(
-            f"Destination exists but does not contain expected output layer "
-            f"{layer_name!r}: {destination}. Use overwrite=True to replace it."
+        if destination != config.source_dataset:
+            raise FileExistsError(
+                f"Destination exists but does not contain expected output layer "
+                f"{layer_name!r}: {destination}. Use overwrite=True to replace it."
+            )
+
+    # 1. Obtain intersected polygons: chained from Stage 1 or fallback intersection
+    source_layer = config.source_intersection_layer
+    if source_layer is not None:
+        LOGGER.info(
+            "Stage 2 (Chained Mode): Reading pre-intersected layer %r from %s.",
+            source_layer,
+            config.source_dataset,
+        )
+        intersection = pyogrio.read_dataframe(
+            config.source_dataset,
+            layer=source_layer,
+        )
+        if not isinstance(intersection, geopandas.GeoDataFrame):
+            intersection = geopandas.GeoDataFrame(
+                intersection,
+                geometry=intersection.geometry.name,
+                crs=intersection.crs,
+            )
+    else:
+        if not config.source_layers:
+            raise ValueError(
+                f"No pre-intersected layer found in {config.source_dataset}, "
+                "and no 'source_layer_prefix' was provided to perform intersection."
+            )
+        LOGGER.info("Executing 4-layer polygon intersection fallback.")
+        validate_source_dataset(config.source_dataset, config.source_layers)
+        intersection = intersect_polygon_layers(
+            source_dataset=config.source_dataset,
+            layer_names=config.source_layers,
         )
 
-    # Resolve or create the effective rule set
+    # 2. Resolve or create the effective rule set
     effective_rule_set = rule_set or config.rule_set
     if effective_rule_set is None:
         effective_rule_set = DefaultMergeRuleSet(
             threshold=config.threshold,
             field_mapping=config.field_mapping or {},
         )
-
-    LOGGER.info("Executing 4-layer polygon intersection.")
-    intersection = intersect_polygon_layers(
-        source_dataset=config.source_dataset,
-        layer_names=config.source_layers,
-    )
 
     LOGGER.info(
         "Merging intersected polygons using rule set: %s (threshold: %.4f).",
@@ -112,9 +143,11 @@ def run_merge(
         len(intersection),
     )
 
+    # 3. Write outputs safely
     _write_outputs(
         merged_gdf=merged_layer,
         destination=destination,
+        source_dataset=config.source_dataset,
         output_format=config.output_format,
         layer_name=layer_name,
         overwrite=config.overwrite,
@@ -181,11 +214,16 @@ def _destination_is_complete(
 def _write_outputs(
     merged_gdf: geopandas.GeoDataFrame,
     destination: pathlib.Path,
+    source_dataset: pathlib.Path,
     output_format: str,
     layer_name: str,
     overwrite: bool,
 ) -> None:
-    """Write merged polygons to a temporary dataset and atomically publish."""
+    """Write merged polygons to a temporary dataset and atomically publish.
+
+    If destination is the same as source_dataset, preserves all other existing
+    layers (e.g. intersected polygons and neighbour tables from Stage 1).
+    """
     _, driver = OUTPUT_FORMATS[output_format]
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -198,19 +236,39 @@ def _write_outputs(
         layer_options["TARGET_ARCGIS_VERSION"] = "ARCGIS_PRO_3_2_OR_LATER"
 
     try:
+        # If destination already exists and contains other layers (e.g. same GDB as Stage 1),
+        # copy those other layers to the temporary dataset first so they are preserved.
+        if destination.exists() and destination == source_dataset:
+            other_layers = [
+                name for name, _ in pyogrio.list_layers(destination)
+                if name != layer_name
+            ]
+            for prev_layer in other_layers:
+                LOGGER.info("Preserving existing layer: %s", prev_layer)
+                prev_df = pyogrio.read_dataframe(destination, layer=prev_layer)
+                pyogrio.write_dataframe(
+                    prev_df,
+                    temporary_path,
+                    layer=prev_layer,
+                    driver=driver,
+                    append=temporary_path.exists(),
+                    layer_options=layer_options or None,
+                )
+
         LOGGER.info("Writing merged polygon layer: %s", layer_name)
         pyogrio.write_dataframe(
             merged_gdf,
             temporary_path,
             layer=layer_name,
             driver=driver,
+            append=temporary_path.exists(),
             promote_to_multi=True,
             layer_options=layer_options or None,
         )
 
         backup_path: pathlib.Path | None = None
         if destination.exists():
-            if not overwrite:
+            if not overwrite and destination != source_dataset:
                 raise FileExistsError(
                     f"Destination already exists: {destination}. "
                     "Use overwrite=True to replace it."

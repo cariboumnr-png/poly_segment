@@ -2,3 +2,4 @@
 /.uv_cache/*
 /sandbox/*
 */__pycache__/*
+/.agents/
