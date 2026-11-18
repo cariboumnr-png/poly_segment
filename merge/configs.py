@@ -41,7 +41,6 @@ import typing
 # third-party imports
 import pyogrio
 # local imports
-from .rules import DEFAULT_MERGE_METRICS
 from .rules import MergeRule
 
 OUTPUT_FORMATS: dict[str, tuple[str, str]] = {
@@ -70,6 +69,7 @@ class MergeConfig:
     rule_set: MergeRule | None = None
     field_mapping: dict[str, str] | None = None
     min_shared_length: float = 0.0
+    destination_gdb_name: str | None = None
 
     @property
     def source_dataset(self) -> pathlib.Path:
@@ -85,12 +85,14 @@ class MergeConfig:
             p = self.source_folder / f"{raw}{ext}"
             if p.exists():
                 return p
-            p_versioned = (
-                self.source_folder
-                / f"isi_mu{self.mu}_postOBC_process_ver{raw}{ext}"
-            )
-            if p_versioned.exists():
-                return p_versioned
+            for prefix in (
+                f"isi_mu{self.mu}_postOBC_intersect_ver",
+                f"isi_mu{self.mu}_postOBC_process_ver",
+                f"isi_mu{self.mu}_postOBC_merge_ver",
+            ):
+                p_versioned = self.source_folder / f"{prefix}{raw}{ext}"
+                if p_versioned.exists():
+                    return p_versioned
 
         dest_ext, _ = OUTPUT_FORMATS.get(
             self.output_format, (".gdb", "OpenFileGDB")
@@ -152,7 +154,13 @@ class MergeConfig:
     @property
     def destination_stem(self) -> str:
         '''Return destination dataset name without extension.'''
-        return f"isi_mu{self.mu}_postOBC_process_ver{self.gdb_version}"
+        if self.destination_gdb_name is not None:
+            raw = self.destination_gdb_name
+            for ext in (".gdb", ".gpkg"):
+                if raw.endswith(ext):
+                    return raw[:-len(ext)]
+            return raw
+        return f"isi_mu{self.mu}_postOBC_merge_ver{self.gdb_version}"
 
     @property
     def destination_dataset(self) -> pathlib.Path:
@@ -197,7 +205,7 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
     )
     parser.add_argument(
         "--source-gdb-name",
-        default="isi_mu780_postOBC_process_verdummy_001",
+        default="isi_mu780_postOBC_intersect_verdummy_001",
         help="Source dataset name from Stage 1.",
     )
     parser.add_argument(
@@ -225,6 +233,11 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         type=pathlib.Path,
         default=None,
         help="Destination folder (defaults to source_folder).",
+    )
+    parser.add_argument(
+        "--destination-gdb-name",
+        default=None,
+        help="Custom destination geodatabase name without extension.",
     )
     parser.add_argument("--gdb-version", default="dummy_001")
     parser.add_argument("--layer-version", default="dummy_001")
@@ -285,5 +298,5 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         threshold=args.threshold,
         output_layer_name=args.output_layer_name,
         min_shared_length=args.min_shared_length,
+        destination_gdb_name=args.destination_gdb_name,
     )
-

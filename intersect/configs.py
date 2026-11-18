@@ -68,6 +68,7 @@ class WorkflowConfig:
     table_version: str
     output_format: str = "filegdb"
     overwrite: bool = False
+    destination_gdb_name: str | None = None
 
     @property
     def source_dataset(self) -> pathlib.Path:
@@ -90,7 +91,13 @@ class WorkflowConfig:
     @property
     def destination_stem(self) -> str:
         '''Return destination dataset stem without extension.'''
-        return f"isi_mu{self.mu}_postOBC_process_ver{self.gdb_version}"
+        if self.destination_gdb_name is not None:
+            raw = self.destination_gdb_name
+            for ext in (".gdb", ".gpkg"):
+                if raw.endswith(ext):
+                    return raw[:-len(ext)]
+            return raw
+        return f"isi_mu{self.mu}_postOBC_intersect_ver{self.gdb_version}"
 
     @property
     def destination_dataset(self) -> pathlib.Path:
@@ -157,6 +164,11 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> WorkflowConfig:
         type=pathlib.Path,
         default=pathlib.Path("D:/process/isi/post_obc_process"),
     )
+    parser.add_argument(
+        "--destination-gdb-name",
+        default=None,
+        help="Custom destination geodatabase name without extension.",
+    )
     parser.add_argument("--gdb-version", default="002")
     parser.add_argument("--table-version", default="002")
     parser.add_argument(
@@ -195,5 +207,6 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> WorkflowConfig:
         table_version=args.table_version,
         output_format=args.output_format,
         overwrite=args.overwrite,
+        destination_gdb_name=args.destination_gdb_name,
     )
 

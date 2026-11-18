@@ -57,19 +57,20 @@ REQUIRED_FIELDS = {
 }
 
 OPTIONAL_FIELDS = {
+    "destination_folder",
+    "destination_gdb_name",
+    "gdb_version",
+    "layer_version",
+    "min_shared_length",
+    "object_level_merge",
+    "output_format",
+    "output_layer_name",
+    "overwrite",
     "source_layer",
     "source_layer_name",
     "source_layer_prefix",
-    "object_level_merge",
-    "destination_folder",
-    "gdb_version",
-    "layer_version",
     "table_version",
-    "output_layer_name",
-    "output_format",
-    "overwrite",
     "threshold",
-    "min_shared_length",
 }
 
 SUPPORTED_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
@@ -207,6 +208,12 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
     min_shared_length = float(raw_config.get("min_shared_length", 0.0))
     object_level_merge = int(raw_config.get("object_level_merge", 3))
 
+    destination_gdb_name = raw_config.get("destination_gdb_name")
+    if destination_gdb_name is not None:
+        destination_gdb_name = _require_string(
+            destination_gdb_name, "destination_gdb_name"
+        )
+
     config = MergeConfig(
         mu=_require_int(raw_config["mu"], "mu"),
         source_folder=source_folder,
@@ -231,6 +238,7 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
         threshold=threshold,
         output_layer_name=output_layer_name,
         min_shared_length=min_shared_length,
+        destination_gdb_name=destination_gdb_name,
     )
 
     _validate_config(config)

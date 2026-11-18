@@ -129,7 +129,7 @@ The destination dataset is:
 
 ```text
 dummy_workflow/output/
-└── isi_mu780_postOBC_process_verdummy_001.gdb
+└── isi_mu780_postOBC_intersect_verdummy_001.gdb
 ```
 
 ## Generate the dummy source data
@@ -360,7 +360,7 @@ from merge import MergeConfig, run_merge, DefaultMergeRuleSet
 config = MergeConfig(
     mu=780,
     source_folder=pathlib.Path("sandbox/output"),
-    source_gdb_name="isi_mu780_postOBC_process_verdummy_001",
+    source_gdb_name="isi_mu780_postOBC_intersect_verdummy_001",
     source_layer="intersected_dummy_001",
     object_level_merge=3,
     destination_folder=pathlib.Path("sandbox/output"),

@@ -1,7 +1,7 @@
 {
   "mu": 780,
   "source_folder": "sandbox/output",
-  "source_gdb_name": "isi_mu780_postOBC_process_verdummy_001",
+  "source_gdb_name": "isi_mu780_postOBC_intersect_verdummy_001",
   "source_layer": "intersected_dummy_001",
   "object_level_merge": 3,
   "destination_folder": "sandbox/output",

@@ -45,13 +45,17 @@ import tempfile
 import typing
 # third-party imports
 import geopandas
-import matplotlib.patches
-import matplotlib.pyplot
 import pyogrio
 
 LOGGER = logging.getLogger("poly_segment_visualize")
 
 DEFAULT_SOURCE_GDB = pathlib.Path("sandbox/input/segmentation_R1.gdb")
+DEFAULT_INTERSECT_GDB = pathlib.Path(
+    "sandbox/output/isi_mu780_postOBC_intersect_verdummy_001.gdb"
+)
+DEFAULT_MERGE_GDB = pathlib.Path(
+    "sandbox/output/isi_mu780_postOBC_merge_verdummy_001.gdb"
+)
 DEFAULT_OUTPUT_GDB = pathlib.Path(
     "sandbox/output/isi_mu780_postOBC_process_verdummy_001.gdb"
 )
@@ -93,10 +97,22 @@ def parse_args(
         help="Path to source File Geodatabase with raw layers.",
     )
     parser.add_argument(
+        "--intersect-gdb",
+        type=pathlib.Path,
+        default=DEFAULT_INTERSECT_GDB,
+        help="Path to Stage 1 intersection File Geodatabase.",
+    )
+    parser.add_argument(
+        "--merge-gdb",
+        type=pathlib.Path,
+        default=DEFAULT_MERGE_GDB,
+        help="Path to Stage 2 merged File Geodatabase.",
+    )
+    parser.add_argument(
         "--output-gdb",
         type=pathlib.Path,
-        default=DEFAULT_OUTPUT_GDB,
-        help="Path to output File Geodatabase with Stage 1 and Stage 2 layers.",
+        default=None,
+        help="Path to optional combined output File Geodatabase.",
     )
     parser.add_argument(
         "--output-image",
@@ -133,6 +149,10 @@ def plot_comparison_figure(
             Target image file path on disk.
     '''
     os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
+    # pylint: disable=import-outside-toplevel
+    import matplotlib.patches
+    import matplotlib.pyplot
+    # pylint: enable=import-outside-toplevel
 
     fig, axes = matplotlib.pyplot.subplots(2, 3, figsize=(18, 11), dpi=200)
     matplotlib.pyplot.subplots_adjust(
@@ -531,25 +551,43 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
             layer=f"segmented_objects_R1_{lvl}",
         )
 
-    LOGGER.info("Loading output layers from %s...", args.output_gdb)
-    available = {name for name, _ in pyogrio.list_layers(args.output_gdb)}
-    intersect_candidates = [
-        n for n in available if n.startswith("intersected_")
-    ]
-    merge_candidates = [
-        n for n in available if n.startswith("merged_polygons_")
-    ]
+    intersect_gdb = args.output_gdb or args.intersect_gdb
+    if not intersect_gdb.exists() and args.output_gdb is None:
+        intersect_gdb = DEFAULT_OUTPUT_GDB
 
+    merge_gdb = args.output_gdb or args.merge_gdb
+    if not merge_gdb.exists() and args.output_gdb is None:
+        merge_gdb = DEFAULT_OUTPUT_GDB
+
+    LOGGER.info("Loading intersected layer from %s...", intersect_gdb)
+    if not intersect_gdb.exists():
+        raise FileNotFoundError(
+            f"Intersect dataset not found: {intersect_gdb}"
+        )
+    avail_intersect = {
+        name for name, _ in pyogrio.list_layers(intersect_gdb)
+    }
+    intersect_candidates = [
+        n for n in avail_intersect if n.startswith("intersected_")
+    ]
     if not intersect_candidates:
-        raise ValueError(f"No intersected layer found in {args.output_gdb}")
+        raise ValueError(f"No intersected layer found in {intersect_gdb}")
+
+    LOGGER.info("Loading merged layer from %s...", merge_gdb)
+    if not merge_gdb.exists():
+        raise FileNotFoundError(f"Merge dataset not found: {merge_gdb}")
+    avail_merge = {name for name, _ in pyogrio.list_layers(merge_gdb)}
+    merge_candidates = [
+        n for n in avail_merge if n.startswith("merged_polygons_")
+    ]
     if not merge_candidates:
-        raise ValueError(f"No merged layer found in {args.output_gdb}")
+        raise ValueError(f"No merged layer found in {merge_gdb}")
 
     intersected_gdf = pyogrio.read_dataframe(
-        args.output_gdb, layer=intersect_candidates[0]
+        intersect_gdb, layer=intersect_candidates[0]
     )
     merged_gdf = pyogrio.read_dataframe(
-        args.output_gdb, layer=merge_candidates[0]
+        merge_gdb, layer=merge_candidates[0]
     )
 
     LOGGER.info(

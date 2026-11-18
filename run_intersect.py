@@ -62,6 +62,7 @@ REQUIRED_FIELDS = {
 }
 
 OPTIONAL_FIELDS = {
+    "destination_gdb_name",
     "output_format",
     "overwrite",
 }
@@ -165,6 +166,12 @@ def load_config(config_path: pathlib.Path) -> WorkflowConfig:
         "destination_folder",
     )
 
+    destination_gdb_name = raw_config.get("destination_gdb_name")
+    if destination_gdb_name is not None:
+        destination_gdb_name = _require_string(
+            destination_gdb_name, "destination_gdb_name"
+        )
+
     config = WorkflowConfig(
         mu=_require_int(raw_config["mu"], "mu"),
         source_folder=source_folder,
@@ -197,6 +204,7 @@ def load_config(config_path: pathlib.Path) -> WorkflowConfig:
             raw_config.get("overwrite", False),
             "overwrite",
         ),
+        destination_gdb_name=destination_gdb_name,
     )
 
     _validate_config(config)

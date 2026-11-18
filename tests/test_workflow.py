@@ -129,7 +129,8 @@ def test_two_stage_sequential_workflow(
     When:
         Stage 1 produces intersection layers, and Stage 2 runs chained.
     Then:
-        Stage 2 skips intersection, merges polygons, and writes layer.
+        Intermediate products remain in Stage 1 dataset while merged
+        polygons are written to a separate Stage 2 dataset.
     '''
     tmp_dir, _ = synthetic_data
     stage1_dest = tmp_dir / "output_sequential"
@@ -160,7 +161,7 @@ def test_two_stage_sequential_workflow(
     merge_cfg = MergeConfig(
         mu=780,
         source_folder=stage1_dest,
-        source_gdb_name="isi_mu780_postOBC_process_verseq_001",
+        source_gdb_name="isi_mu780_postOBC_intersect_verseq_001",
         source_layer=intersect_cfg.intersection_layer,
         object_level_merge=3,
         destination_folder=stage1_dest,
@@ -171,12 +172,23 @@ def test_two_stage_sequential_workflow(
         overwrite=True,
     )
     merged_gdf = run_merge(merge_cfg)
+    stage2_gdb = merge_cfg.destination_dataset
 
-    # verify stage 2 succeeded and all three layers exist
+    # verify datasets are separate and both exist
     assert not merged_gdf.empty
-    layers_after_stage2 = {name for name, _ in pyogrio.list_layers(stage1_gdb)}
-    assert intersect_cfg.intersection_layer in layers_after_stage2
-    assert intersect_cfg.neighbour_table in layers_after_stage2
-    assert merge_cfg.merged_layer in layers_after_stage2
+    assert stage1_gdb != stage2_gdb
+    assert stage1_gdb.exists()
+    assert stage2_gdb.exists()
+
+    # intermediate products are preserved in stage 1 gdb
+    layers_stage1 = {name for name, _ in pyogrio.list_layers(stage1_gdb)}
+    assert intersect_cfg.intersection_layer in layers_stage1
+    assert intersect_cfg.neighbour_table in layers_stage1
+    assert merge_cfg.merged_layer not in layers_stage1
+
+    # merged output is isolated in stage 2 gdb
+    layers_stage2 = {name for name, _ in pyogrio.list_layers(stage2_gdb)}
+    assert merge_cfg.merged_layer in layers_stage2
+    assert intersect_cfg.intersection_layer not in layers_stage2
 
 
