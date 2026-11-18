@@ -48,7 +48,7 @@ from intersect import run_workflow
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = pathlib.Path("config.json")
+DEFAULT_CONFIG_PATH = pathlib.Path("intersect_config.json")
 
 REQUIRED_FIELDS = {
     "mu",
