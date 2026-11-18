@@ -118,6 +118,80 @@ def test_merge_workflow_geopackage(
     assert config.destination_dataset.exists()
 
 
+def test_merge_workflow_with_metric_subset(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate workflow when user selects metric subset and tolerances.
+
+    Given:
+        A synthetic source dataset.
+    When:
+        `run_merge` executes with metric subset and custom threshold.
+    Then:
+        Only the specified subset of metrics is used for merging.
+    '''
+    tmp_dir, _ = synthetic_data
+    dest_dir = tmp_dir / "output_subset"
+
+    config = MergeConfig(
+        mu=780,
+        source_folder=tmp_dir,
+        source_gdb_name="test_segmentation",
+        source_layer_prefix="segmented_objects",
+        object_level_merge=3,
+        destination_folder=dest_dir,
+        gdb_version="test_sub_001",
+        layer_version="test_sub_001",
+        output_format="filegdb",
+        metrics=("zq95", "vci_1m"),
+        threshold=0.10,
+        per_metric_thresholds={"zq95": 0.15, "vci_1m": 0.05},
+        overwrite=True,
+    )
+
+    merged_gdf = run_merge(config)
+    assert not merged_gdf.empty
+    assert config.destination_dataset.exists()
+
+
+def test_merge_workflow_with_metric_subset(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate workflow when user selects metric subset and tolerances.
+
+    Given:
+        A synthetic source dataset.
+    When:
+        `run_merge` executes with metric subset and custom threshold.
+    Then:
+        Only the specified subset of metrics is used for merging.
+    '''
+    tmp_dir, _ = synthetic_data
+    dest_dir = tmp_dir / "output_subset"
+
+    config = MergeConfig(
+        mu=780,
+        source_folder=tmp_dir,
+        source_gdb_name="test_segmentation",
+        source_layer_prefix="segmented_objects",
+        object_level_merge=3,
+        destination_folder=dest_dir,
+        gdb_version="test_sub_001",
+        layer_version="test_sub_001",
+        output_format="filegdb",
+        metrics=("zq95", "vci_1m"),
+        threshold=0.10,
+        per_metric_thresholds={"zq95": 0.15, "vci_1m": 0.05},
+        overwrite=True,
+    )
+
+    merged_gdf = run_merge(config)
+    assert not merged_gdf.empty
+    assert config.destination_dataset.exists()
+
+
 def test_two_stage_sequential_workflow(
     synthetic_data: tuple[pathlib.Path, pathlib.Path],
 ) -> None:
@@ -190,5 +264,3 @@ def test_two_stage_sequential_workflow(
     layers_stage2 = {name for name, _ in pyogrio.list_layers(stage2_gdb)}
     assert merge_cfg.merged_layer in layers_stage2
     assert intersect_cfg.intersection_layer not in layers_stage2
-
-

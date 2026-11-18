@@ -332,15 +332,37 @@ Public API:
 from merge import MergeConfig, run_merge, DefaultMergeRuleSet, MetricDifferenceRule
 ```
 
-### Starting Rule Set
+### Rule Evaluation & Tolerances
 
-The starting rule set performs a direct absolute difference comparison across six metrics:
-`zq95`, `vci_1m`, and `LMoments (1-4)`. Merging between candidate neighbours $A$ and $B$
-is permitted if and only if:
+By default, the merge rule set performs an absolute difference comparison across
+all standard metrics (`zq95`, `vci_1m`, and `LMoments 1-4`). Merging between
+candidate neighbours $A$ and $B$ is permitted if and only if **all** evaluated
+metrics are within tolerance:
 
-$$|v_m(A) - v_m(B)| \le c \quad \forall m \in \{\text{zq95}, \text{vci\_1m}, \text{LMoment1}, \text{LMoment2}, \text{LMoment3}, \text{LMoment4}\}$$
+$$|v_m(A) - v_m(B)| \le c_m \quad \forall m \in M$$
 
-where $c$ is a constant threshold (default `0.10`).
+where $M$ is the evaluated metric set and $c_m$ is the tolerance for metric $m$
+(defaulting to global `threshold = 0.10`).
+
+Users can select any subset of attributes to compare and configure per-metric
+tolerance levels via JSON configuration, Python API, or CLI:
+
+```json
+{
+  "metrics": ["zq95", "vci_1m"],
+  "threshold": 0.10,
+  "per_metric_thresholds": {
+    "zq95": 0.15,
+    "vci_1m": 0.05
+  }
+}
+```
+
+CLI flags:
+
+```bash
+python run_merge.py merge_config.json --metrics zq95,vci_1m --per-metric-thresholds zq95=0.15,vci_1m=0.05
+```
 
 ### Running the Merge Workflow
 

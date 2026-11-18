@@ -181,3 +181,58 @@ def test_default_merge_rule_set() -> None:
     assert "vci_1m" in rule_set.metrics
     assert "LMoment1" in rule_set.metrics
 
+
+def test_metric_subset_selection() -> None:
+    '''
+    Validate rule evaluation when a subset of attributes is chosen.
+
+    Given:
+        A `DefaultMergeRuleSet` configured only for 'zq95' and 'vci_1m'.
+    When:
+        Candidate neighbours are evaluated where other metrics differ.
+    Then:
+        Only selected metrics must satisfy tolerance for merge to pass.
+    '''
+    rule_set = DefaultMergeRuleSet(
+        threshold=0.10,
+        metrics=("zq95", "vci_1m"),
+    )
+    assert rule_set.metrics == ("zq95", "vci_1m")
+
+    # non-selected metrics (e.g. `LMoment1`) differ greatly
+    # but are ignored
+    source = {"zq95": 10.05, "vci_1m": 0.52, "LMoment1": 1.0}
+    cand = {"zq95": 10.00, "vci_1m": 0.50, "LMoment1": 99.0}
+    assert rule_set.can_merge(source, cand) is True
+
+    # selected metric exceeds tolerance
+    cand_fail = {"zq95": 10.25, "vci_1m": 0.50, "LMoment1": 1.0}
+    assert rule_set.can_merge(source, cand_fail) is False
+
+
+def test_per_metric_thresholds() -> None:
+    '''
+    Validate per-metric custom tolerance levels.
+
+    Given:
+        A rule set with custom thresholds for 'zq95' and 'vci_1m'.
+    When:
+        Pairs are evaluated against individual tolerance levels.
+    Then:
+        Each metric respects its specific threshold rather than global.
+    '''
+    rule_set = DefaultMergeRuleSet(
+        threshold=0.10,
+        metrics=("zq95", "vci_1m"),
+        per_metric_thresholds={"zq95": 0.20, "vci_1m": 0.02},
+    )
+
+    # zq95 diff = 0.15 (<= 0.20), vci_1m diff = 0.01 (<= 0.02)
+    source = {"zq95": 10.00, "vci_1m": 0.50}
+    cand = {"zq95": 10.15, "vci_1m": 0.51}
+    assert rule_set.can_merge(source, cand) is True
+
+    # vci_1m diff = 0.05 (> 0.02 custom tolerance) -> fails
+    cand_fail = {"zq95": 10.05, "vci_1m": 0.55}
+    assert rule_set.can_merge(source, cand_fail) is False
+

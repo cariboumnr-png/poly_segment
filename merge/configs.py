@@ -70,6 +70,13 @@ class MergeConfig:
     field_mapping: dict[str, str] | None = None
     min_shared_length: float = 0.0
     destination_gdb_name: str | None = None
+    metrics: tuple[str, ...] | list[str] | None = None
+    per_metric_thresholds: dict[str, float] | None = None
+
+    def __post_init__(self) -> None:
+        '''Normalize metric collections to immutable tuples.'''
+        if self.metrics is not None and not isinstance(self.metrics, tuple):
+            object.__setattr__(self, "metrics", tuple(self.metrics))
 
     @property
     def source_dataset(self) -> pathlib.Path:
@@ -264,6 +271,22 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         help="Maximum absolute difference threshold for metric comparisons.",
     )
     parser.add_argument(
+        "--metrics",
+        default=None,
+        help=(
+            "Comma-separated list of attributes to compare (e.g. "
+            "'zq95,vci_1m'). Defaults to all standard metrics."
+        ),
+    )
+    parser.add_argument(
+        "--per-metric-thresholds",
+        default=None,
+        help=(
+            "Comma-separated key=value tolerances (e.g. "
+            "'zq95=0.15,vci_1m=0.05')."
+        ),
+    )
+    parser.add_argument(
         "--min-shared-length",
         type=float,
         default=0.0,
@@ -283,6 +306,20 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    metrics: tuple[str, ...] | None = None
+    if args.metrics:
+        metrics = tuple(
+            m.strip() for m in args.metrics.split(",") if m.strip()
+        )
+
+    per_metric_thresholds: dict[str, float] | None = None
+    if args.per_metric_thresholds:
+        per_metric_thresholds = {}
+        for item in args.per_metric_thresholds.split(","):
+            if "=" in item:
+                k, v = item.split("=", 1)
+                per_metric_thresholds[k.strip()] = float(v.strip())
+
     return MergeConfig(
         mu=args.mu,
         source_folder=args.source_folder,
@@ -299,4 +336,6 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         output_layer_name=args.output_layer_name,
         min_shared_length=args.min_shared_length,
         destination_gdb_name=args.destination_gdb_name,
+        metrics=metrics,
+        per_metric_thresholds=per_metric_thresholds,
     )

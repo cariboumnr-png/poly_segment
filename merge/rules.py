@@ -63,6 +63,10 @@ METRIC_NAME_PATTERNS: dict[str, tuple[str, ...]] = {
     "LMoment2": ("mean_lmoment2", "lmoment2", "lmoments_2", "l_moment2"),
     "LMoment3": ("mean_lmoment3", "lmoment3", "lmoments_3", "l_moment3"),
     "LMoment4": ("mean_lmoment4", "lmoment4", "lmoments_4", "l_moment4"),
+    "S2_Peak2": ("mean_s2_peak2", "s2_peak2", "peak2"),
+    "S2_PreLeaf": ("mean_s2_preleaf", "s2_preleaf", "preleaf"),
+    "S2_Senes": ("mean_s2_senes", "s2_senes", "senes"),
+    "TPI": ("mean_tpi", "tpi"),
 }
 
 

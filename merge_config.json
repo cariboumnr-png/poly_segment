@@ -7,6 +7,14 @@
   "destination_folder": "sandbox/output",
   "gdb_version": "dummy_001",
   "layer_version": "dummy_001",
+  "metrics": [
+    "zq95",
+    "vci_1m",
+    "LMoment1",
+    "LMoment2",
+    "LMoment3",
+    "LMoment4"
+  ],
   "threshold": 0.10,
   "output_format": "filegdb",
   "overwrite": true

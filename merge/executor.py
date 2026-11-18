@@ -44,6 +44,7 @@ import pyogrio
 # local imports
 from .configs import MergeConfig
 from .configs import OUTPUT_FORMATS
+from .rules import DEFAULT_MERGE_METRICS
 from .rules import DefaultMergeRuleSet
 from .rules import MergeRule
 from .spatial import intersect_polygon_layers
@@ -141,7 +142,9 @@ def run_merge(
     if effective_rule_set is None:
         effective_rule_set = DefaultMergeRuleSet(
             threshold=config.threshold,
+            metrics=config.metrics or DEFAULT_MERGE_METRICS,
             field_mapping=config.field_mapping or {},
+            per_metric_thresholds=config.per_metric_thresholds or {},
         )
 
     LOGGER.info(

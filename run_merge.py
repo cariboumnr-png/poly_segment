@@ -61,16 +61,19 @@ OPTIONAL_FIELDS = {
     "destination_gdb_name",
     "gdb_version",
     "layer_version",
+    "metrics",
     "min_shared_length",
     "object_level_merge",
     "output_format",
     "output_layer_name",
     "overwrite",
+    "per_metric_thresholds",
     "source_layer",
     "source_layer_name",
     "source_layer_prefix",
     "table_version",
     "threshold",
+    "thresholds",
 }
 
 SUPPORTED_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
@@ -214,6 +217,37 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
             destination_gdb_name, "destination_gdb_name"
         )
 
+    metrics_raw = raw_config.get("metrics")
+    metrics: tuple[str, ...] | None = None
+    if metrics_raw is not None:
+        if isinstance(metrics_raw, str):
+            metrics = tuple(
+                m.strip() for m in metrics_raw.split(",") if m.strip()
+            )
+        elif isinstance(metrics_raw, (list, tuple)):
+            metrics = tuple(str(m).strip() for m in metrics_raw)
+        else:
+            raise TypeError(
+                "Field 'metrics' must be a list of strings or "
+                "comma-separated string."
+            )
+
+    thresholds_raw = raw_config.get(
+        "per_metric_thresholds",
+        raw_config.get("thresholds"),
+    )
+    per_metric_thresholds: dict[str, float] | None = None
+    if thresholds_raw is not None:
+        if isinstance(thresholds_raw, dict):
+            per_metric_thresholds = {
+                str(k): float(v) for k, v in thresholds_raw.items()
+            }
+        else:
+            raise TypeError(
+                "Field 'per_metric_thresholds' must be an object mapping "
+                "metric names to float tolerances."
+            )
+
     config = MergeConfig(
         mu=_require_int(raw_config["mu"], "mu"),
         source_folder=source_folder,
@@ -239,6 +273,8 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
         output_layer_name=output_layer_name,
         min_shared_length=min_shared_length,
         destination_gdb_name=destination_gdb_name,
+        metrics=metrics,
+        per_metric_thresholds=per_metric_thresholds,
     )
 
     _validate_config(config)
