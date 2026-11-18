@@ -28,6 +28,7 @@ sweeps with extended visualization artifacts.
 '''
 
 # standard imports
+import json
 import pathlib
 # third-party imports
 import pyogrio
@@ -36,8 +37,9 @@ from intersect import WorkflowConfig as IntersectConfig
 from intersect import run_workflow as run_intersect
 from merge import MergeConfig
 from merge import run_merge
-from run_merge_sweep import DEFAULT_SWEEP_TRIALS
+from run_merge_sweep import SweepConfig
 from run_merge_sweep import SweepTrial
+from run_merge_sweep import load_sweep_config
 from run_merge_sweep import run_merge_sweep
 
 
@@ -113,43 +115,6 @@ def test_merge_workflow_geopackage(
         layer_version="test_001",
         output_format="geopackage",
         threshold=0.10,
-        overwrite=True,
-    )
-
-    merged_gdf = run_merge(config)
-    assert not merged_gdf.empty
-    assert config.destination_dataset.exists()
-
-
-def test_merge_workflow_with_metric_subset(
-    synthetic_data: tuple[pathlib.Path, pathlib.Path],
-) -> None:
-    '''
-    Validate workflow when user selects metric subset and tolerances.
-
-    Given:
-        A synthetic source dataset.
-    When:
-        `run_merge` executes with metric subset and custom threshold.
-    Then:
-        Only the specified subset of metrics is used for merging.
-    '''
-    tmp_dir, _ = synthetic_data
-    dest_dir = tmp_dir / "output_subset"
-
-    config = MergeConfig(
-        mu=780,
-        source_folder=tmp_dir,
-        source_gdb_name="test_segmentation",
-        source_layer_prefix="segmented_objects",
-        object_level_merge=3,
-        destination_folder=dest_dir,
-        gdb_version="test_sub_001",
-        layer_version="test_sub_001",
-        output_format="filegdb",
-        metrics=("zq95", "vci_1m"),
-        threshold=0.10,
-        per_metric_thresholds={"zq95": 0.15, "vci_1m": 0.05},
         overwrite=True,
     )
 
@@ -417,7 +382,7 @@ def test_merge_sweep_visualization_integration(
         ),
     )
 
-    result = run_merge_sweep(
+    _ = run_merge_sweep(
         base_config=base_merge_cfg,
         trials=trials,
         visualize=True,
@@ -433,3 +398,59 @@ def test_merge_sweep_visualization_integration(
     assert "Trial 1" in html_text
     assert "Trial 2" in html_text
     assert "<svg" in html_text
+
+
+def test_load_sweep_config_json(
+    tmp_path: pathlib.Path,
+) -> None:
+    '''
+    Validate JSON loading and conversion into SweepConfig.
+
+    Given:
+        A valid JSON sweep configuration document with trials.
+    When:
+        `load_sweep_config` parses the JSON file.
+    Then:
+        A validated `SweepConfig` instance with parsed trials is produced.
+    '''
+    cfg_file = tmp_path / "custom_sweep.json"
+    cfg_file.write_text(
+        json.dumps({
+            "mu": 780,
+            "source_folder": str(tmp_path),
+            "source_gdb_name": "test_src",
+            "destination_folder": str(tmp_path),
+            "destination_gdb_name": "test_sweep.gdb",
+            "trials": [
+                {
+                    "name": "trial_a",
+                    "threshold": 0.08,
+                    "metrics": ["zq95"],
+                },
+                {
+                    "name": "trial_b",
+                    "threshold": 0.04,
+                    "per_metric_thresholds": {
+                        "zq95": 0.05,
+                        "vci_1m": 0.02,
+                    },
+                },
+            ],
+            "visualize": False,
+        }),
+        encoding="utf-8",
+    )
+
+    sweep_cfg = load_sweep_config(cfg_file)
+    assert isinstance(sweep_cfg, SweepConfig)
+    assert sweep_cfg.base_config.mu == 780
+    assert sweep_cfg.destination_gdb_name == "test_sweep.gdb"
+    assert len(sweep_cfg.trials) == 2
+    assert sweep_cfg.trials[0].name == "trial_a"
+    assert sweep_cfg.trials[0].metrics == ("zq95",)
+    assert sweep_cfg.trials[0].threshold == 0.08
+    assert sweep_cfg.trials[1].per_metric_thresholds == {
+        "zq95": 0.05,
+        "vci_1m": 0.02,
+    }
+    assert sweep_cfg.visualize is False

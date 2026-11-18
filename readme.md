@@ -54,6 +54,7 @@ project-root/
 │   └── test_workflow.py
 ├── intersect_config.json      # Stage 1: Intersection workflow configuration
 ├── merge_config.json          # Stage 2: Merging workflow configuration
+├── merge_sweep_config.json    # Stage 2: Multi-trial merge parameter sweep configuration
 ├── run_intersect.py           # CLI runner for Stage 1 (intersect)
 ├── run_merge.py               # CLI runner for Stage 2 (merge)
 ├── run_merge_sweep.py         # Multi-trial parameter sweep orchestrator
@@ -410,7 +411,62 @@ visualizations (PNG graphic + interactive HTML viewer).
 Public API:
 
 ```python
-from run_merge_sweep import SweepTrial, DEFAULT_SWEEP_TRIALS, run_merge_sweep
+from run_merge_sweep import (
+    SweepConfig,
+    SweepTrial,
+    DEFAULT_SWEEP_TRIALS,
+    load_sweep_config,
+    run_merge_sweep,
+)
+```
+
+### Configuration File (`merge_sweep_config.json`)
+
+`merge_sweep_config.json` exposes all base geodatabase parameters, output visual
+paths, and the complete array of parameter trials:
+
+```json
+{
+  "mu": 780,
+  "source_folder": "sandbox/output",
+  "source_gdb_name": "isi_mu780_postOBC_intersect_verdummy_001",
+  "source_layer": "intersected_dummy_001",
+  "destination_folder": "sandbox/output",
+  "destination_gdb_name": "isi_mu780_postOBC_merge_sweep_verdummy_001.gdb",
+  "visualize": true,
+  "trials": [
+    {
+      "name": "all_standard",
+      "label": "Trial 1: All Metrics (Standard)",
+      "description": "All 6 structural metrics at 10% tolerance",
+      "threshold": 0.10,
+      "metrics": null,
+      "per_metric_thresholds": null
+    },
+    {
+      "name": "canopy_only",
+      "label": "Trial 2: Canopy Height Only",
+      "description": "Canopy height (ZQ95) at 10% tolerance",
+      "threshold": 0.10,
+      "metrics": ["zq95"]
+    },
+    {
+      "name": "canopy_strict_vci",
+      "label": "Trial 3: Canopy + Strict VCI",
+      "description": "Relaxed ZQ95 (15%) + strict foliage density (3%)",
+      "threshold": 0.10,
+      "metrics": ["zq95", "vci_1m"],
+      "per_metric_thresholds": {"zq95": 0.15, "vci_1m": 0.03}
+    },
+    {
+      "name": "strict_structural",
+      "label": "Trial 4: Strict Structural",
+      "description": "Ultra-tight 2% tolerance preserving sub-stand variations",
+      "threshold": 0.02,
+      "metrics": ["zq95", "vci_1m"]
+    }
+  ]
+}
 ```
 
 ### Predefined Demonstration Trials
@@ -427,7 +483,11 @@ The default demonstration suite evaluates four forestry / remote sensing scenari
 ### Running the Sweep Orchestrator
 
 ```bash
-python run_merge_sweep.py --config merge_config.json
+# Run with default merge_sweep_config.json
+python run_merge_sweep.py
+
+# Or specify a custom sweep configuration file
+python run_merge_sweep.py merge_sweep_config.json
 ```
 
 Output artifacts generated:

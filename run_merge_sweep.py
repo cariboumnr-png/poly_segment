@@ -23,13 +23,16 @@
 Parameter sweep orchestrator for Stage 2 polygon merging.
 
 Executes an array of parameter combinations (e.g. varying structural
-metrics and tolerance thresholds) over Stage 1 intersected polygon
-products, and produces extended multi-panel graphics and interactive
+metrics and tolerance thresholds) loaded from a sweep configuration JSON
+document, and produces extended multi-panel graphics and interactive
 HTML viewers comparing all trials side-by-side.
 
 Public APIs:
     - `SweepTrial`: Dataclass specifying single trial parameters.
+    - `SweepConfig`: Dataclass specifying complete sweep configuration.
+    - `DEFAULT_CONFIG_PATH`: Default configuration file path.
     - `DEFAULT_SWEEP_TRIALS`: Predefined array of demonstration trials.
+    - `load_sweep_config`: Load and validate sweep JSON configuration.
     - `run_merge_sweep`: Programmatic sweep orchestrator function.
     - `parse_args`: Parse command-line arguments.
     - `main`: Entry point for script execution.
@@ -50,17 +53,27 @@ import pyogrio
 # local imports
 from merge import MergeConfig
 from merge import run_merge
-from run_merge import load_config
+from run_merge import load_config as load_base_merge_config
 from scripts.visualize import generate_interactive_html
 from scripts.visualize import plot_comparison_figure
 
 LOGGER = logging.getLogger("poly_segment_sweep")
 
-DEFAULT_CONFIG_PATH = pathlib.Path("merge_config.json")
+DEFAULT_CONFIG_PATH = pathlib.Path("merge_sweep_config.json")
 DEFAULT_RAW_GDB = pathlib.Path("sandbox/input/segmentation_R1.gdb")
 DEFAULT_PNG_PATH = pathlib.Path("sandbox/output/sweep_visualization.png")
 DEFAULT_HTML_PATH = pathlib.Path("sandbox/output/sweep_visualization.html")
 DEFAULT_SUMMARY_PATH = pathlib.Path("sandbox/output/sweep_summary.json")
+
+SWEEP_SPECIAL_FIELDS = {
+    "base_config",
+    "output_html",
+    "output_image",
+    "output_summary",
+    "raw_gdb",
+    "trials",
+    "visualize",
+}
 
 
 # ----- public dataclasses
@@ -74,6 +87,19 @@ class SweepTrial:
     metrics: tuple[str, ...] | None = None
     per_metric_thresholds: dict[str, float] | None = None
     output_layer_name: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class SweepConfig:
+    '''Configuration container for merge parameter sweep execution.'''
+    base_config: MergeConfig
+    trials: tuple[SweepTrial, ...]
+    destination_gdb_name: str | None = None
+    visualize: bool = True
+    raw_source_gdb: pathlib.Path | None = None
+    output_image: pathlib.Path | None = None
+    output_html: pathlib.Path | None = None
+    output_summary_json: pathlib.Path | None = None
 
 
 DEFAULT_SWEEP_TRIALS: tuple[SweepTrial, ...] = (
@@ -134,10 +160,18 @@ def parse_args(
         )
     )
     parser.add_argument(
-        "--config",
+        "config",
+        nargs="?",
         type=pathlib.Path,
         default=DEFAULT_CONFIG_PATH,
-        help="Path to base merge JSON configuration file.",
+        help="Path to merge sweep JSON configuration file.",
+    )
+    parser.add_argument(
+        "--config",
+        dest="config_flag",
+        type=pathlib.Path,
+        default=None,
+        help="Explicit flag for merge sweep JSON configuration file.",
     )
     parser.add_argument(
         "--sweep-gdb",
@@ -148,7 +182,7 @@ def parse_args(
     parser.add_argument(
         "--raw-gdb",
         type=pathlib.Path,
-        default=DEFAULT_RAW_GDB,
+        default=None,
         help="Path to raw input segmentation File Geodatabase.",
     )
     parser.add_argument(
@@ -159,29 +193,125 @@ def parse_args(
     parser.add_argument(
         "--output-image",
         type=pathlib.Path,
-        default=DEFAULT_PNG_PATH,
+        default=None,
         help="Path to export multi-panel sweep PNG graphic.",
     )
     parser.add_argument(
         "--output-html",
         type=pathlib.Path,
-        default=DEFAULT_HTML_PATH,
+        default=None,
         help="Path to export interactive sweep HTML visualizer.",
     )
     parser.add_argument(
         "--output-summary",
         type=pathlib.Path,
-        default=DEFAULT_SUMMARY_PATH,
+        default=None,
         help="Path to export trial results summary JSON document.",
     )
     return parser.parse_args(argv)
 
 
+def load_sweep_config(config_path: pathlib.Path) -> SweepConfig:
+    '''
+    Load, validate, and convert a JSON merge sweep configuration.
+
+    Args:
+        config_path:
+            Path to the JSON configuration file on disk.
+
+    Returns:
+        SweepConfig:
+            Validated sweep configuration instance containing base config,
+            trials, and visual settings.
+
+    Raises:
+        FileNotFoundError:
+            If configuration file does not exist.
+        ValueError:
+            If JSON syntax is invalid or fields are malformed.
+        TypeError:
+            If JSON root or trial items are not objects.
+    '''
+    config_path = config_path.resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(
+            f"Sweep configuration file does not exist: {config_path}"
+        )
+
+    try:
+        with config_path.open(encoding="utf-8") as stream:
+            raw_config = json.load(stream)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"Invalid JSON in {config_path}: "
+            f"line {error.lineno}, column {error.colno}: {error.msg}"
+        ) from error
+
+    if not isinstance(raw_config, dict):
+        raise TypeError(
+            f"Configuration root must be a JSON object: {config_path}"
+        )
+
+    config_dir = config_path.parent
+
+    # 1. resolve base MergeConfig
+    base_config: MergeConfig
+    if "base_config" in raw_config:
+        base_ref = pathlib.Path(str(raw_config["base_config"]))
+        base_path = (
+            base_ref if base_ref.is_absolute() else config_dir / base_ref
+        )
+        base_config = load_base_merge_config(base_path)
+    else:
+        base_config = _parse_inline_merge_config(raw_config, config_dir)
+
+    # 2. resolve destination sweep geodatabase name
+    destination_gdb_name = raw_config.get(
+        "destination_gdb_name",
+        base_config.destination_gdb_name,
+    )
+    if destination_gdb_name is not None:
+        destination_gdb_name = str(destination_gdb_name)
+
+    # 3. parse trials array
+    trials: tuple[SweepTrial, ...]
+    if "trials" in raw_config and raw_config["trials"] is not None:
+        trials = _parse_trials(raw_config["trials"])
+    else:
+        trials = DEFAULT_SWEEP_TRIALS
+
+    # 4. resolve visualization settings
+    visualize = bool(raw_config.get("visualize", True))
+    raw_source_gdb = _resolve_optional_path(
+        raw_config.get("raw_gdb"), config_dir
+    )
+    output_image = _resolve_optional_path(
+        raw_config.get("output_image"), config_dir
+    )
+    output_html = _resolve_optional_path(
+        raw_config.get("output_html"), config_dir
+    )
+    output_summary = _resolve_optional_path(
+        raw_config.get("output_summary"), config_dir
+    )
+
+    return SweepConfig(
+        base_config=base_config,
+        trials=trials,
+        destination_gdb_name=destination_gdb_name,
+        visualize=visualize,
+        raw_source_gdb=raw_source_gdb,
+        output_image=output_image,
+        output_html=output_html,
+        output_summary_json=output_summary,
+    )
+
+
 def run_merge_sweep(
-    base_config: MergeConfig,
-    trials: typing.Sequence[SweepTrial] = DEFAULT_SWEEP_TRIALS,
+    base_config: MergeConfig | SweepConfig,
+    trials: typing.Sequence[SweepTrial] | None = None,
     destination_gdb_name: str | None = None,
-    visualize: bool = True,
+    visualize: bool | None = None,
     raw_source_gdb: pathlib.Path | None = None,
     output_image: pathlib.Path | None = None,
     output_html: pathlib.Path | None = None,
@@ -192,9 +322,9 @@ def run_merge_sweep(
 
     Args:
         base_config:
-            Base MergeConfig instance providing source paths and defaults.
+            MergeConfig or SweepConfig providing base paths and defaults.
         trials:
-            Sequence of SweepTrial specifications to execute.
+            Optional sequence of SweepTrial specifications to execute.
         destination_gdb_name:
             Optional geodatabase name to store all trial layers.
         visualize:
@@ -213,41 +343,79 @@ def run_merge_sweep(
             Execution report containing trial statistics, GeoDataFrames,
             and generated artifact paths.
     '''
-    if not trials:
+    resolved_base: MergeConfig
+    resolved_trials: tuple[SweepTrial, ...]
+    resolved_gdb_name: str | None
+    resolved_vis: bool
+    resolved_raw: pathlib.Path | None
+    resolved_img: pathlib.Path | None
+    resolved_htm: pathlib.Path | None
+    resolved_sum: pathlib.Path | None
+
+    if isinstance(base_config, SweepConfig):
+        resolved_base = base_config.base_config
+        resolved_trials = (
+            tuple(trials) if trials is not None else base_config.trials
+        )
+        resolved_gdb_name = (
+            destination_gdb_name or base_config.destination_gdb_name
+        )
+        resolved_vis = (
+            visualize if visualize is not None else base_config.visualize
+        )
+        resolved_raw = raw_source_gdb or base_config.raw_source_gdb
+        resolved_img = output_image or base_config.output_image
+        resolved_htm = output_html or base_config.output_html
+        resolved_sum = (
+            output_summary_json or base_config.output_summary_json
+        )
+    else:
+        resolved_base = base_config
+        resolved_trials = (
+            tuple(trials) if trials is not None else DEFAULT_SWEEP_TRIALS
+        )
+        resolved_gdb_name = destination_gdb_name
+        resolved_vis = True if visualize is None else visualize
+        resolved_raw = raw_source_gdb
+        resolved_img = output_image
+        resolved_htm = output_html
+        resolved_sum = output_summary_json
+
+    if not resolved_trials:
         raise ValueError("Parameter sweep requires at least one SweepTrial.")
 
-    resolved_gdb_name = (
-        destination_gdb_name
-        or f"isi_mu{base_config.mu}_postOBC_merge_sweep_"
-        f"ver{base_config.gdb_version}.gdb"
+    gdb_stem = (
+        resolved_gdb_name
+        or f"isi_mu{resolved_base.mu}_postOBC_merge_sweep_"
+        f"ver{resolved_base.gdb_version}.gdb"
     )
 
     LOGGER.info(
         "Starting merge sweep (%d trials) writing into %s",
-        len(trials),
-        resolved_gdb_name,
+        len(resolved_trials),
+        gdb_stem,
     )
 
     trial_records: list[dict[str, typing.Any]] = []
     visual_items: list[tuple[str, geopandas.GeoDataFrame, str]] = []
     gdfs_by_name: dict[str, geopandas.GeoDataFrame] = {}
 
-    assert base_config.destination_folder
-    destination_path = base_config.destination_folder / resolved_gdb_name
+    assert resolved_base.destination_folder
+    destination_path = resolved_base.destination_folder / gdb_stem
 
-    for trial_idx, trial in enumerate(trials, start=1):
+    for trial_idx, trial in enumerate(resolved_trials, start=1):
         layer_name = trial.output_layer_name or f"merged_trial_{trial.name}"
         LOGGER.info(
             "[%d/%d] Running trial %r -> layer %r",
             trial_idx,
-            len(trials),
+            len(resolved_trials),
             trial.name,
             layer_name,
         )
 
         trial_config = dataclasses.replace(
-            base_config,
-            destination_gdb_name=resolved_gdb_name,
+            resolved_base,
+            destination_gdb_name=gdb_stem,
             output_layer_name=layer_name,
             threshold=trial.threshold,
             metrics=trial.metrics,
@@ -292,15 +460,15 @@ def run_merge_sweep(
             area_ha_mean,
         )
 
-    # export summary JSON if path provided
-    summary_path = output_summary_json or DEFAULT_SUMMARY_PATH
+    # export summary JSON if path resolved or default
+    summary_path = resolved_sum or DEFAULT_SUMMARY_PATH
     try:
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         with summary_path.open("w", encoding="utf-8") as stream:
             json.dump(
                 {
                     "sweep_dataset": str(destination_path),
-                    "total_trials": len(trials),
+                    "total_trials": len(resolved_trials),
                     "trials": trial_records,
                 },
                 stream,
@@ -312,15 +480,15 @@ def run_merge_sweep(
             "Could not write summary JSON to %s: %s", summary_path, err
         )
 
-    png_path = output_image or DEFAULT_PNG_PATH
-    html_path = output_html or DEFAULT_HTML_PATH
+    png_path = resolved_img or DEFAULT_PNG_PATH
+    html_path = resolved_htm or DEFAULT_HTML_PATH
 
     # extended multi-panel visualization
-    if visualize:
+    if resolved_vis:
         _render_sweep_visualizations(
-            base_config=base_config,
+            base_config=resolved_base,
             visual_items=visual_items,
-            raw_source_gdb=raw_source_gdb,
+            raw_source_gdb=resolved_raw,
             output_png=png_path,
             output_html=html_path,
         )
@@ -329,15 +497,15 @@ def run_merge_sweep(
         "destination_dataset": destination_path,
         "trials": gdfs_by_name,
         "summary": trial_records,
-        "output_image": png_path if visualize else None,
-        "output_html": html_path if visualize else None,
+        "output_image": png_path if resolved_vis else None,
+        "output_html": html_path if resolved_vis else None,
         "summary_json": summary_path,
     }
 
 
 def main(argv: typing.Sequence[str] | None = None) -> None:
     '''
-    Load base configuration and execute polygon merge parameter sweep.
+    Load sweep configuration and execute polygon merge parameter sweep.
 
     Args:
         argv:
@@ -351,12 +519,16 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    base_config = load_config(args.config)
+    config_path = args.config_flag or args.config
+    sweep_config = load_sweep_config(config_path)
+
+    # CLI flags override sweep config file if provided
+    visualize_override = False if args.no_visualize else None
 
     run_merge_sweep(
-        base_config=base_config,
+        base_config=sweep_config,
         destination_gdb_name=args.sweep_gdb,
-        visualize=not args.no_visualize,
+        visualize=visualize_override,
         raw_source_gdb=args.raw_gdb,
         output_image=args.output_image,
         output_html=args.output_html,
@@ -365,6 +537,93 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
 
 
 # ----- private helpers
+def _parse_trials(raw_trials: typing.Any) -> tuple[SweepTrial, ...]:
+    '''Parse sequence of trial specification dictionaries.'''
+    if not isinstance(raw_trials, (list, tuple)):
+        raise TypeError("Configuration field 'trials' must be a list.")
+
+    parsed: list[SweepTrial] = []
+    for idx, item in enumerate(raw_trials, start=1):
+        if not isinstance(item, dict):
+            raise TypeError(f"Trial item #{idx} must be a JSON object.")
+        if "name" not in item:
+            raise ValueError(f"Trial item #{idx} is missing 'name' field.")
+
+        name = str(item["name"])
+        label = str(item.get("label", f"Trial: {name}"))
+        desc = str(item.get("description", ""))
+        threshold = float(item.get("threshold", 0.10))
+
+        metrics_raw = item.get("metrics")
+        metrics: tuple[str, ...] | None = None
+        if metrics_raw is not None:
+            if isinstance(metrics_raw, str):
+                metrics = tuple(
+                    m.strip() for m in metrics_raw.split(",") if m.strip()
+                )
+            elif isinstance(metrics_raw, (list, tuple)):
+                metrics = tuple(str(m).strip() for m in metrics_raw)
+            else:
+                raise TypeError(
+                    f"Trial {name!r} 'metrics' must be list or string."
+                )
+
+        per_metric_raw = item.get("per_metric_thresholds")
+        per_metric: dict[str, float] | None = None
+        if per_metric_raw is not None:
+            if isinstance(per_metric_raw, dict):
+                per_metric = {
+                    str(k): float(v) for k, v in per_metric_raw.items()
+                }
+            else:
+                raise TypeError(
+                    f"Trial {name!r} 'per_metric_thresholds' must be an object."
+                )
+
+        out_layer = item.get("output_layer_name")
+        parsed.append(
+            SweepTrial(
+                name=name,
+                label=label,
+                description=desc,
+                threshold=threshold,
+                metrics=metrics,
+                per_metric_thresholds=per_metric,
+                output_layer_name=str(out_layer) if out_layer else None,
+            )
+        )
+    return tuple(parsed)
+
+
+def _parse_inline_merge_config(
+    raw_config: dict[str, typing.Any],
+    config_dir: pathlib.Path,
+) -> MergeConfig:
+    '''Extract base MergeConfig fields from root configuration document.'''
+    base_fields = {
+        k: v for k, v in raw_config.items() if k not in SWEEP_SPECIAL_FIELDS
+    }
+    temp_json = config_dir / f"._tmp_merge_cfg_{time.time_ns()}.json"
+    try:
+        with temp_json.open("w", encoding="utf-8") as stream:
+            json.dump(base_fields, stream)
+        return load_base_merge_config(temp_json)
+    finally:
+        if temp_json.exists():
+            temp_json.unlink(missing_ok=True)
+
+
+def _resolve_optional_path(
+    value: typing.Any,
+    config_dir: pathlib.Path,
+) -> pathlib.Path | None:
+    '''Resolve an optional configuration path relative to config directory.'''
+    if value is None:
+        return None
+    path_val = pathlib.Path(str(value))
+    return path_val if path_val.is_absolute() else config_dir / path_val
+
+
 def _format_trial_badge(trial: SweepTrial) -> str:
     '''Format metrics and tolerance legend banner text for subplot.'''
     if trial.per_metric_thresholds:
