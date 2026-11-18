@@ -222,12 +222,19 @@ def merge_intersected_polygons(
     # Classify columns for aggregation
     geom_col = intersection.geometry.name
     id_cols = [c for c in intersection.columns if c.startswith("FID_") or c.endswith("_id")]
+    color_and_class_cols = [
+        c for c in intersection.columns
+        if c in ("landcover", "hex_color", "color_r", "color_g", "color_b")
+        or any(c.endswith(f"_{s}") for s in ("landcover", "hex_color", "color_r", "color_g", "color_b"))
+    ]
     numeric_cols = [
         c for c in intersection.columns
         if c != geom_col
         and c not in id_cols
+        and c not in color_and_class_cols
         and pandas.api.types.is_numeric_dtype(intersection[c])
     ]
+    representative_cols = id_cols + color_and_class_cols
 
     merged_records: list[dict[str, object]] = []
     merged_geometries: list[shapely_base.BaseGeometry] = []
@@ -252,12 +259,19 @@ def merge_intersected_polygons(
             records_df=member_df,
             areas=member_areas,
             numeric_columns=numeric_cols,
-            id_columns=id_cols,
+            id_columns=representative_cols,
         )
         attrs["merge_cluster_id"] = int(cluster_id)
         merged_records.append(attrs)
 
     result_df = pandas.DataFrame.from_records(merged_records)
+
+    # Promote top-level thematic class and color fields from selected object level
+    for key in ("landcover", "hex_color", "color_r", "color_g", "color_b"):
+        lvl_key = f"L{object_level}_{key}"
+        if lvl_key in result_df.columns and key not in result_df.columns:
+            result_df[key] = result_df[lvl_key]
+
     merged_gdf = geopandas.GeoDataFrame(
         result_df,
         geometry=merged_geometries,

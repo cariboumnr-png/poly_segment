@@ -137,41 +137,65 @@ dummy_workflow/output/
 Run from the project root:
 
 ```bash
-python generate_dummy_data.py --overwrite
+python scripts/generate_dummy_data.py --overwrite
 ```
 
-The generator creates four polygon grid layers:
+By default (`--pattern organic`), the generator creates four realistic, multi-scale
+organic polygon layers using Lloyd-relaxed Voronoi tessellations across a 1 km by 1 km
+extent in `EPSG:26917`:
 
-| Layer | Grid | Feature count |
-|---|---:|---:|
-| `segmented_objects_R1_1` | 2 by 2 | 4 |
-| `segmented_objects_R1_2` | 3 by 3 | 9 |
-| `segmented_objects_R1_3` | 4 by 4 | 16 |
-| `segmented_objects_R1_4` | 5 by 5 | 25 |
+| Layer | Segmentation Scale | Feature count |
+|---|---|---:|
+| `segmented_objects_R1_1` | Level 1: Coarse management zones | 6 |
+| `segmented_objects_R1_2` | Level 2: Stand compartments | 12 |
+| `segmented_objects_R1_3` | Level 3: Sub-stands / Object merge level | 24 |
+| `segmented_objects_R1_4` | Level 4: Fine micro-segments / tree clusters | 45 |
 
-All layers cover the same 1 km by 1 km extent in `EPSG:26917`. Their different
-grid resolutions create meaningful polygon intersections, shared edges, and
-point contacts.
-
-The dummy attributes vary by segmentation level, row, and column. `Mean_TPI`
-also includes signed values to exercise the symmetric relative-difference
-calculation.
-
-The generator only creates input data. It does not execute the application
-workflow.
-
-## Run the workflow
-
-Run with the default configuration:
+Traditional rectangular grids can also be generated using:
 
 ```bash
-python run_from_config.py
+python scripts/generate_dummy_data.py --overwrite --pattern grid
 ```
 
-Or specify the configuration explicitly:
+### Color Mapping & Landcover Classes
+
+Each polygon includes thematic landcover classification and embedded color codes:
+
+| Landcover Class | Hex Color | RGB | Description |
+|---|---|---|---|
+| **Mature Conifer** | `#1e5631` | `(30, 86, 49)` | High canopy height (`zq95 ~ 24.5 m`), high density (`vci ~ 0.68`) |
+| **Mixed Forest** | `#4c9a2a` | `(76, 154, 42)` | Medium-high canopy (`zq95 ~ 17.2 m`), medium density (`vci ~ 0.48`) |
+| **Regenerating Forest** | `#8dc63f` | `(141, 198, 63)` | Young stand (`zq95 ~ 7.8 m`), open density (`vci ~ 0.31`) |
+| **Wetland Meadow** | `#e5c158` | `(229, 193, 88)` | Low ground vegetation (`zq95 ~ 1.4 m`), sparse density (`vci ~ 0.12`) |
+
+Attributes within the same landcover zone vary by less than `0.05`, allowing Stage 2
+(`run_merge.py`) to dissolve over-segmented sub-polygons within each stand back into
+cohesive forest stands while sharply preserving true boundaries.
+
+## Visualization
+
+A dedicated visualizer generates both static high-resolution graphics and an interactive HTML viewer:
 
 ```bash
-python run_from_config.py dummy_config.json
+python scripts/visualize.py
+```
+
+Outputs:
+* **Comparison Image (PNG)**: `sandbox/output/workflow_visualization.png` (2x3 panel comparison of all 4 input levels, Stage 1 intersection, and Stage 2 merged stands).
+* **Interactive Viewer (HTML)**: `sandbox/output/workflow_visualization.html` (interactive map with layer toggles and hover inspection of canopy height, VCI, and stand attributes).
+
+## Run the workflow in sequence
+
+Stage 1 (Intersection and neighbour difference analysis):
+
+```bash
+python run_intersect.py intersect_config.json
+```
+
+Stage 2 (Rule-based polygon merging):
+
+```bash
+python run_merge.py merge_config.json
 ```
 
 The runner:
