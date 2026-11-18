@@ -19,21 +19,28 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Execute the polygon merging workflow and safely write outputs to disk."""
+'''
+Execution runner for Stage 2 polygon merging workflow.
 
-from __future__ import annotations
+Orchestrates loading pre-intersected or raw polygon layers, applying
+rule sets to evaluate neighbours, dissolving qualifying components,
+and atomically writing results.
+
+Public APIs:
+    - `run_merge`: Execute the complete polygon merge workflow.
+    - `run_workflow`: Workflow runner alias for `run_merge`.
+'''
 
 # standard imports
+from __future__ import annotations
 import logging
 import pathlib
 import shutil
 import typing
 import uuid
-
 # third-party imports
 import geopandas
 import pyogrio
-
 # local imports
 from .configs import MergeConfig
 from .configs import OUTPUT_FORMATS
@@ -43,7 +50,6 @@ from .spatial import intersect_polygon_layers
 from .spatial import merge_intersected_polygons
 from .spatial import validate_source_dataset
 
-
 LOGGER = logging.getLogger("poly_segment_merge")
 
 
@@ -52,15 +58,28 @@ def run_merge(
     config: MergeConfig,
     rule_set: MergeRule | None = None,
 ) -> geopandas.GeoDataFrame:
-    """Execute Stage 2 of the workflow: polygon layer merging.
+    '''
+    Execute Stage 2 of the workflow: polygon layer merging.
 
-    1. In chained mode, loads the pre-intersected layer from Stage 1 output
-       (skipping geometric intersection). In standalone mode, intersects the 4
-       raw input layers.
-    2. Evaluates candidate neighbours against the injected rule set.
-    3. Merges adjacent qualifying polygons into a single polygon layer.
-    4. Writes the merged layer atomically to the destination dataset.
-    """
+    Args:
+        config:
+            Merge configuration with source and destination parameters.
+        rule_set:
+            Optional custom merge rule set overriding configuration.
+
+    Returns:
+        geopandas.GeoDataFrame:
+            Merged polygon layer with aggregated attributes.
+
+    Raises:
+        FileNotFoundError:
+            If source dataset does not exist.
+        FileExistsError:
+            If destination exists without required layer and overwrite
+            is False.
+        ValueError:
+            If no source layers can be found to merge.
+    '''
     _validate_environment(config.output_format)
 
     if not config.source_dataset.exists():
@@ -82,11 +101,11 @@ def run_merge(
             return geopandas.read_file(destination, layer=layer_name)
         if destination != config.source_dataset:
             raise FileExistsError(
-                f"Destination exists but does not contain expected output layer "
-                f"{layer_name!r}: {destination}. Use overwrite=True to replace it."
+                "Destination exists but does not contain expected output "
+                f"layer {layer_name!r}: {destination}. Use overwrite=True."
             )
 
-    # 1. Obtain intersected polygons: chained from Stage 1 or fallback intersection
+    # 1. obtain intersected polygons: chained from Stage 1 or fallback
     source_layer = config.source_intersection_layer
     if source_layer is not None:
         LOGGER.info(
@@ -108,7 +127,7 @@ def run_merge(
         if not config.source_layers:
             raise ValueError(
                 f"No pre-intersected layer found in {config.source_dataset}, "
-                "and no 'source_layer_prefix' was provided to perform intersection."
+                "and no 'source_layer_prefix' was provided."
             )
         LOGGER.info("Executing 4-layer polygon intersection fallback.")
         validate_source_dataset(config.source_dataset, config.source_layers)
@@ -117,7 +136,7 @@ def run_merge(
             layer_names=config.source_layers,
         )
 
-    # 2. Resolve or create the effective rule set
+    # 2. resolve or create the effective rule set
     effective_rule_set = rule_set or config.rule_set
     if effective_rule_set is None:
         effective_rule_set = DefaultMergeRuleSet(
@@ -138,12 +157,13 @@ def run_merge(
     )
 
     LOGGER.info(
-        "Result: %d merged polygons produced from %d original intersection polygons.",
+        "Result: %d merged polygons produced from %d original "
+        "intersection polygons.",
         len(merged_layer),
         len(intersection),
     )
 
-    # 3. Write outputs safely
+    # 3. write outputs safely
     _write_outputs(
         merged_gdf=merged_layer,
         destination=destination,
@@ -156,13 +176,13 @@ def run_merge(
     return merged_layer
 
 
-# API symmetry alias
+# api symmetry alias
 run_workflow = run_merge
 
 
 # ----- private helpers
 def _validate_environment(output_format: str) -> None:
-    """Ensure the requested output driver is available and writable."""
+    '''Ensure the requested output driver is available and writable.'''
     _, driver = OUTPUT_FORMATS[output_format]
     writable_drivers = pyogrio.list_drivers(write=True)
 
@@ -187,7 +207,7 @@ def _validate_environment(output_format: str) -> None:
 
 
 def _remove_dataset(path: pathlib.Path) -> None:
-    """Remove a temporary or backup dataset and common SQLite sidecars."""
+    '''Remove temporary dataset and SQLite sidecars.'''
     if path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
@@ -203,7 +223,7 @@ def _destination_is_complete(
     destination: pathlib.Path,
     required_layers: typing.Sequence[str],
 ) -> bool:
-    """Return True when an existing destination contains all required layers."""
+    '''Return True if destination contains all required layers.'''
     existing_layers = {
         str(layer_name)
         for layer_name, _ in pyogrio.list_layers(destination)
@@ -219,11 +239,7 @@ def _write_outputs(
     layer_name: str,
     overwrite: bool,
 ) -> None:
-    """Write merged polygons to a temporary dataset and atomically publish.
-
-    If destination is the same as source_dataset, preserves all other existing
-    layers (e.g. intersected polygons and neighbour tables from Stage 1).
-    """
+    '''Write merged polygons and atomically publish to destination.'''
     _, driver = OUTPUT_FORMATS[output_format]
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -236,8 +252,8 @@ def _write_outputs(
         layer_options["TARGET_ARCGIS_VERSION"] = "ARCGIS_PRO_3_2_OR_LATER"
 
     try:
-        # If destination already exists and contains other layers (e.g. same GDB as Stage 1),
-        # copy those other layers to the temporary dataset first so they are preserved.
+        # if destination already exists and contains other layers, copy
+        # them to the temporary dataset first so they are preserved.
         if destination.exists() and destination == source_dataset:
             other_layers = [
                 name for name, _ in pyogrio.list_layers(destination)
@@ -294,3 +310,4 @@ def _write_outputs(
             _remove_dataset(temporary_path)
 
     LOGGER.info("Merged polygons successfully written to %s", destination)
+

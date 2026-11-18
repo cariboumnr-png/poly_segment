@@ -19,24 +19,39 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Integration tests for the complete merge workflow."""
+'''
+Integration tests for the complete merge workflow.
 
+Validates end-to-end execution for File Geodatabase and GeoPackage
+outputs, as well as two-stage sequential execution chaining Stage 1
+intersection outputs directly into Stage 2 polygon merging.
+'''
+
+# standard imports
+import pathlib
+# third-party imports
 import pyogrio
+# local imports
+from intersect import WorkflowConfig as IntersectConfig
+from intersect import run_workflow as run_intersect
+from merge import MergeConfig
+from merge import run_merge
 
-from merge import MergeConfig, run_merge
 
+# ----- test cases
+def test_merge_workflow_filegdb(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate complete merge workflow producing File Geodatabase.
 
-def test_merge_workflow_filegdb(synthetic_data):
-    """
     Given:
-        A valid synthetic File Geodatabase containing four segmentation levels
-        and a MergeConfig targeting 'filegdb' format.
+        A valid synthetic File Geodatabase containing 4 levels.
     When:
-        The complete run_merge workflow is executed.
+        The complete `run_merge` workflow is executed.
     Then:
-        The merged GeoDataFrame is produced with cluster and area metadata, and
-        the output layer is atomically written to the destination .gdb.
-    """
+        The merged GeoDataFrame is produced and written to `.gdb`.
+    '''
     tmp_dir, _ = synthetic_data
     dest_dir = tmp_dir / "output"
 
@@ -61,24 +76,26 @@ def test_merge_workflow_filegdb(synthetic_data):
     assert "num_merged_parts" in merged_gdf.columns
     assert "merged_area_m2" in merged_gdf.columns
 
-    # Verify output on disk
+    # verify output on disk
     dest_path = config.destination_dataset
     assert dest_path.exists()
     layers = [name for name, _ in pyogrio.list_layers(dest_path)]
     assert config.merged_layer in layers
 
 
-def test_merge_workflow_geopackage(synthetic_data):
-    """
+def test_merge_workflow_geopackage(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate complete merge workflow producing GeoPackage output.
+
     Given:
-        A synthetic source dataset and a MergeConfig targeting 'geopackage' (.gpkg)
-        output format.
+        A synthetic source dataset and a `MergeConfig` for 'geopackage'.
     When:
-        The run_merge workflow is executed.
+        The `run_merge` workflow is executed.
     Then:
-        The workflow completes successfully and the output GeoPackage file is created
-        on disk containing the merged polygon layer.
-    """
+        The workflow completes and GeoPackage is created on disk.
+    '''
     tmp_dir, _ = synthetic_data
     dest_dir = tmp_dir / "output_gpkg"
 
@@ -101,25 +118,23 @@ def test_merge_workflow_geopackage(synthetic_data):
     assert config.destination_dataset.exists()
 
 
-def test_two_stage_sequential_workflow(synthetic_data):
-    """
+def test_two_stage_sequential_workflow(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate chained two-stage execution from Stage 1 to Stage 2.
+
     Given:
         A 4-layer synthetic source dataset.
     When:
-        Stage 1 (run_workflow from intersect) produces the intersection layer and neighbour table,
-        and Stage 2 (run_merge from merge) is executed in chained mode directly consuming
-        Stage 1's intersection layer.
+        Stage 1 produces intersection layers, and Stage 2 runs chained.
     Then:
-        Stage 2 skips geometric intersection, merges candidate polygons according to the rule set,
-        and safely adds the merged layer to the geodatabase preserving all previous layers.
-    """
-    from intersect import WorkflowConfig as IntersectConfig
-    from intersect import run_workflow as run_intersect
-
+        Stage 2 skips intersection, merges polygons, and writes layer.
+    '''
     tmp_dir, _ = synthetic_data
     stage1_dest = tmp_dir / "output_sequential"
 
-    # Stage 1: Intersect
+    # stage 1: intersect
     intersect_cfg = IntersectConfig(
         mu=780,
         source_folder=tmp_dir,
@@ -134,14 +149,14 @@ def test_two_stage_sequential_workflow(synthetic_data):
     )
     run_intersect(intersect_cfg)
 
-    # Verify Stage 1 created expected layers
+    # verify stage 1 created expected layers
     stage1_gdb = intersect_cfg.destination_dataset
     assert stage1_gdb.exists()
     layers_after_stage1 = {name for name, _ in pyogrio.list_layers(stage1_gdb)}
     assert intersect_cfg.intersection_layer in layers_after_stage1
     assert intersect_cfg.neighbour_table in layers_after_stage1
 
-    # Stage 2: Merge in chained mode consuming Stage 1 output
+    # stage 2: merge in chained mode consuming stage 1 output
     merge_cfg = MergeConfig(
         mu=780,
         source_folder=stage1_dest,
@@ -157,10 +172,11 @@ def test_two_stage_sequential_workflow(synthetic_data):
     )
     merged_gdf = run_merge(merge_cfg)
 
-    # Verify Stage 2 succeeded and all three layers exist in the same geodatabase
+    # verify stage 2 succeeded and all three layers exist
     assert not merged_gdf.empty
     layers_after_stage2 = {name for name, _ in pyogrio.list_layers(stage1_gdb)}
     assert intersect_cfg.intersection_layer in layers_after_stage2
     assert intersect_cfg.neighbour_table in layers_after_stage2
     assert merge_cfg.merged_layer in layers_after_stage2
+
 

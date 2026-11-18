@@ -19,28 +19,37 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Unit tests for spatial operations and polygon merging."""
+'''
+Unit tests for spatial operations and polygon merging.
 
+Validates disjoint-set connected components and adjacent polygon merging
+with area-weighted attribute aggregation.
+'''
+
+# third-party imports
 import geopandas
 import pytest
 import shapely.geometry
-
+# local imports
 from merge.rules import MetricDifferenceRule
-from merge.spatial import _DisjointSet, merge_intersected_polygons
+from merge.spatial import _DisjointSet
+from merge.spatial import merge_intersected_polygons
 
 
-def test_disjoint_set():
-    """
+# ----- test cases
+def test_disjoint_set() -> None:
+    '''
+    Validate disjoint-set union-find operations and connectivity.
+
     Given:
-        A DisjointSet initialized with 5 distinct elements.
+        A `_DisjointSet` initialized with 5 distinct elements.
     When:
-        Consecutive union operations are performed on subsets of elements.
+        Consecutive union operations are performed on subsets.
     Then:
-        Elements are correctly grouped into connected clusters with transitive
-        connectivity and verified component counts.
-    """
+        Elements are correctly grouped into connected clusters.
+    '''
     ds = _DisjointSet(5)
-    # Initially 5 individual clusters
+    # initially 5 individual clusters
     assert len(ds.groups()) == 5
 
     ds.union(0, 1)
@@ -55,18 +64,18 @@ def test_disjoint_set():
     assert len(ds.groups()) == 2
 
 
-def test_merge_intersected_polygons_simple():
-    """
+def test_merge_intersected_polygons_simple() -> None:
+    '''
+    Validate simple 2x2 grid adjacent polygon merging.
+
     Given:
-        A GeoDataFrame of 4 adjacent grid polygons with assigned 'zq95' and 'vci_1m' attributes,
-        where only two adjacent polygons have differences within threshold 0.10.
+        A GeoDataFrame of 4 adjacent grid polygons with attributes.
     When:
-        merge_intersected_polygons is executed with a MetricDifferenceRule.
+        `merge_intersected_polygons` runs with `MetricDifferenceRule`.
     Then:
-        The two qualifying polygons are merged into a single dissolved polygon with area 2.0
-        and area-weighted attributes, while the remaining polygons stay separate.
-    """
-    # Create 4 adjacent 1x1 squares in a 2x2 grid
+        The two qualifying polygons are merged into a single polygon.
+    '''
+    # create 4 adjacent 1x1 squares in a 2x2 grid
     # (0,1): top-left, (1,1): top-right
     # (0,0): bot-left, (1,0): bot-right
     boxes = [
@@ -76,8 +85,8 @@ def test_merge_intersected_polygons_simple():
         shapely.geometry.box(1, 1, 2, 2),  # 3: top-right
     ]
 
-    # Let 0 and 1 have similar zq95 (within 0.10)
-    # Let 2 and 3 have different zq95
+    # let 0 and 1 have similar zq95 (within 0.10)
+    # let 2 and 3 have different zq95
     df = geopandas.GeoDataFrame(
         {
             "segment_id": [1, 2, 3, 4],
@@ -93,11 +102,13 @@ def test_merge_intersected_polygons_simple():
 
     # 0 and 1 should merge into 1 polygon of area 2.0
     # 2 and 3 remain distinct (each area 1.0)
-    # Total merged features = 3
+    # total merged features = 3
     assert len(merged) == 3
 
-    # Check that one merged polygon has area 2.0 and 2 parts
+    # check that one merged polygon has area 2.0 and 2 parts
     two_part = merged[merged["num_merged_parts"] == 2]
     assert len(two_part) == 1
     assert pytest.approx(two_part["merged_area_m2"].iloc[0]) == 2.0
-    assert pytest.approx(two_part["zq95"].iloc[0]) == 10.025  # area-weighted mean (10.0 + 10.05)/2
+    expected_zq95 = (10.00 + 10.05) / 2.0
+    assert pytest.approx(two_part["zq95"].iloc[0]) == expected_zq95
+

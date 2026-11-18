@@ -19,23 +19,24 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Run the polygon-neighbour workflow from a JSON configuration file.
+'''
+Run the polygon-neighbour workflow from a JSON configuration file.
 
-Relative paths in the JSON document are resolved relative to the JSON file,
-making execution independent of the current working directory.
+Relative paths in the JSON document are resolved relative to the
+JSON file, making execution independent of current working directory.
 
-Run from the project root:
-
-    python run_from_config.py
-
-Use another configuration file:
-
-    python run_from_config.py path/to/config.json
-"""
-
-from __future__ import annotations
+Public APIs:
+    - `DEFAULT_CONFIG_PATH`: Default configuration file path.
+    - `REQUIRED_FIELDS`: Set of required JSON configuration keys.
+    - `OPTIONAL_FIELDS`: Set of optional JSON configuration keys.
+    - `SUPPORTED_FIELDS`: Set of all supported configuration keys.
+    - `parse_args`: Parse command-line arguments.
+    - `load_config`: Load, validate, and convert JSON configuration.
+    - `main`: Entry point for script execution.
+'''
 
 # standard imports
+from __future__ import annotations
 import argparse
 import json
 import logging
@@ -44,7 +45,6 @@ import typing
 # local imports
 from intersect import WorkflowConfig
 from intersect import run_workflow
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,10 +69,21 @@ OPTIONAL_FIELDS = {
 SUPPORTED_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
 
 
+# ----- public functions
 def parse_args(
     argv: typing.Sequence[str] | None = None,
 ) -> argparse.Namespace:
-    """Parse command-line arguments."""
+    '''
+    Parse command-line arguments.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+
+    Returns:
+        argparse.Namespace:
+            Parsed command-line arguments.
+    '''
     parser = argparse.ArgumentParser(
         description="Run the polygon-neighbour workflow from JSON."
     )
@@ -87,7 +98,25 @@ def parse_args(
 
 
 def load_config(config_path: pathlib.Path) -> WorkflowConfig:
-    """Load, validate, and convert a JSON workflow configuration."""
+    '''
+    Load, validate, and convert a JSON workflow configuration.
+
+    Args:
+        config_path:
+            Path to the JSON configuration file on disk.
+
+    Returns:
+        WorkflowConfig:
+            Validated configuration dataclass instance.
+
+    Raises:
+        FileNotFoundError:
+            If configuration file does not exist.
+        ValueError:
+            If JSON syntax is invalid or fields are missing/unsupported.
+        TypeError:
+            If JSON root is not an object or field types are invalid.
+    '''
     config_path = config_path.resolve()
 
     if not config_path.is_file():
@@ -174,12 +203,38 @@ def load_config(config_path: pathlib.Path) -> WorkflowConfig:
     return config
 
 
+def main(argv: typing.Sequence[str] | None = None) -> None:
+    '''
+    Load the JSON configuration and execute the public workflow API.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+    '''
+    args = parse_args(argv)
+    config = load_config(args.config)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    LOGGER.info("Configuration loaded from %s.", args.config.resolve())
+    LOGGER.info("Source dataset: %s.", config.source_dataset)
+    LOGGER.info("Selected source layer: %s.", config.selected_source_layer)
+    LOGGER.info("Destination dataset: %s.", config.destination_dataset)
+
+    run_workflow(config)
+
+
+# ----- private helpers
 def _resolve_path(
     value: object,
     base_directory: pathlib.Path,
     field_name: str,
 ) -> pathlib.Path:
-    """Resolve a configured path relative to the JSON file."""
+    '''Resolve a configured path relative to the JSON file.'''
     path_value = pathlib.Path(_require_string(value, field_name))
 
     if not path_value.is_absolute():
@@ -189,7 +244,7 @@ def _resolve_path(
 
 
 def _require_string(value: object, field_name: str) -> str:
-    """Return a non-empty configuration string."""
+    '''Return a non-empty configuration string.'''
     if not isinstance(value, str) or not value.strip():
         raise TypeError(
             f"Configuration field {field_name!r} must be a "
@@ -199,7 +254,7 @@ def _require_string(value: object, field_name: str) -> str:
 
 
 def _require_int(value: object, field_name: str) -> int:
-    """Return a configuration integer, rejecting booleans."""
+    '''Return a configuration integer, rejecting booleans.'''
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(
             f"Configuration field {field_name!r} must be an integer."
@@ -208,7 +263,7 @@ def _require_int(value: object, field_name: str) -> int:
 
 
 def _require_bool(value: object, field_name: str) -> bool:
-    """Return a configuration Boolean."""
+    '''Return a configuration Boolean.'''
     if not isinstance(value, bool):
         raise TypeError(
             f"Configuration field {field_name!r} must be a Boolean."
@@ -217,7 +272,7 @@ def _require_bool(value: object, field_name: str) -> bool:
 
 
 def _validate_config(config: WorkflowConfig) -> None:
-    """Validate constraints not enforced by the dataclass."""
+    '''Validate constraints not enforced by the dataclass.'''
     if config.object_level_merge not in {1, 2, 3, 4}:
         raise ValueError(
             "Configuration field 'object_level_merge' must be "
@@ -234,25 +289,6 @@ def _validate_config(config: WorkflowConfig) -> None:
         raise ValueError(
             "Configuration field 'mu' must be non-negative."
         )
-
-
-def main(argv: typing.Sequence[str] | None = None) -> None:
-    """Load the JSON configuration and execute the public workflow API."""
-    args = parse_args(argv)
-    config = load_config(args.config)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    LOGGER.info("Configuration loaded from %s.", args.config.resolve())
-    LOGGER.info("Source dataset: %s.", config.source_dataset)
-    LOGGER.info("Selected source layer: %s.", config.selected_source_layer)
-    LOGGER.info("Destination dataset: %s.", config.destination_dataset)
-
-    run_workflow(config)
 
 
 if __name__ == "__main__":

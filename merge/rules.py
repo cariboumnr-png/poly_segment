@@ -19,26 +19,34 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Injectable merge rules and rule sets for polygon neighbour evaluation.
+'''
+Injectable merge rules and rule sets for polygon neighbour evaluation.
 
-Defines the contract for candidate neighbour evaluation, individual metric
-difference rules, and composite rule sets.
-"""
+Defines candidate neighbour evaluation, individual metric difference
+rules, composite rule sets, and automatic field resolution.
 
-from __future__ import annotations
+Public APIs:
+    - `DEFAULT_MERGE_METRICS`: Default sequence of metric names.
+    - `METRIC_NAME_PATTERNS`: Metric name search patterns.
+    - `MergeRule`: Base class for polygon neighbour merging rules.
+    - `MetricDifferenceRule`: Rule evaluating metric differences.
+    - `RuleSet`: Composite rule container evaluating rules in all/any.
+    - `DefaultMergeRuleSet`: Default rule comparing standard metrics.
+    - `auto_resolve_field_mapping`: Auto-resolve metric column names.
+'''
+
+# pylint: disable=missing-function-docstring
 
 # standard imports
+from __future__ import annotations
 import abc
 import dataclasses
 import re
 import typing
-
 # third-party imports
 import numpy
 import pandas
 
-
-# ----- constants
 DEFAULT_MERGE_METRICS: tuple[str, ...] = (
     "zq95",
     "vci_1m",
@@ -58,45 +66,32 @@ METRIC_NAME_PATTERNS: dict[str, tuple[str, ...]] = {
 }
 
 
-# ----- rule protocol / base classes
+# ----- public types
 class MergeRule(abc.ABC):
-    """Abstract base class for polygon neighbour merging rules."""
-
+    '''Abstract base class for polygon neighbour merging rules.'''
     @property
     @abc.abstractmethod
-    def name(self) -> str:
-        """Return the descriptive name of the rule."""
+    def name(self) -> str: ...
 
     @abc.abstractmethod
     def can_merge(
         self,
         source_attrs: typing.Mapping[str, float],
         candidate_attrs: typing.Mapping[str, float],
-    ) -> bool:
-        """Evaluate whether a single pair of neighbour objects can merge."""
+    ) -> bool: ...
 
     @abc.abstractmethod
     def evaluate_batch(
         self,
         sources: pandas.DataFrame,
         candidates: pandas.DataFrame,
-    ) -> numpy.ndarray:
-        """Vectorized evaluation of multiple candidate neighbour pairs.
-
-        Returns a 1-D boolean numpy array indicating whether each pair permits
-        merging.
-        """
+    ) -> numpy.ndarray: ...
 
 
+# ----- public dataclasses
 @dataclasses.dataclass(frozen=True, slots=True)
 class MetricDifferenceRule(MergeRule):
-    """Rule that merges neighbours if absolute differences are within threshold.
-
-    For each specified metric:
-        abs(source[metric] - candidate[metric]) <= threshold
-    All specified metrics must satisfy this condition.
-    """
-
+    '''Merge neighbours when metric differences meet threshold.'''
     metrics: tuple[str, ...] = DEFAULT_MERGE_METRICS
     threshold: float = 0.10
     field_mapping: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -119,7 +114,7 @@ class MetricDifferenceRule(MergeRule):
         source_attrs: typing.Mapping[str, float],
         candidate_attrs: typing.Mapping[str, float],
     ) -> bool:
-        """Evaluate a single pair of objects against the metric differences."""
+        '''Evaluate pair of objects against metric differences.'''
         for metric in self.metrics:
             col = self._resolve_column(metric)
             if col not in source_attrs or col not in candidate_attrs:
@@ -140,7 +135,25 @@ class MetricDifferenceRule(MergeRule):
         sources: pandas.DataFrame,
         candidates: pandas.DataFrame,
     ) -> numpy.ndarray:
-        """Evaluate candidate pairs in vectorized batch."""
+        '''
+        Evaluate candidate pairs in vectorized batch.
+
+        Args:
+            sources:
+                DataFrame of source object attributes.
+            candidates:
+                DataFrame of candidate object attributes.
+
+        Returns:
+            numpy.ndarray:
+                Boolean mask indicating qualifying pairs.
+
+        Raises:
+            ValueError:
+                If input DataFrames have differing lengths.
+            KeyError:
+                If required metric column is missing from either table.
+        '''
         if len(sources) != len(candidates):
             raise ValueError(
                 "Source and candidate DataFrames must have the same length."
@@ -169,8 +182,9 @@ class MetricDifferenceRule(MergeRule):
         return mask
 
 
+# ----- public classes
 class RuleSet(MergeRule):
-    """Composite rule set evaluating multiple rules under 'all' or 'any' mode."""
+    '''Composite rule set evaluating rules under 'all' or 'any'.'''
 
     def __init__(
         self,
@@ -202,6 +216,7 @@ class RuleSet(MergeRule):
         source_attrs: typing.Mapping[str, float],
         candidate_attrs: typing.Mapping[str, float],
     ) -> bool:
+        '''Evaluate single pair against composite rules.'''
         if self._mode == "all":
             return all(
                 r.can_merge(source_attrs, candidate_attrs)
@@ -217,6 +232,7 @@ class RuleSet(MergeRule):
         sources: pandas.DataFrame,
         candidates: pandas.DataFrame,
     ) -> numpy.ndarray:
+        '''Evaluate candidate pairs against composite rules in batch.'''
         if len(sources) == 0:
             return numpy.empty(0, dtype=bool)
 
@@ -236,55 +252,8 @@ class RuleSet(MergeRule):
         return combined
 
 
-def auto_resolve_field_mapping(
-    columns: typing.Sequence[str],
-    metrics: typing.Sequence[str] = DEFAULT_MERGE_METRICS,
-    preferred_level: int | None = None,
-) -> dict[str, str]:
-    """Automatically resolve column names in available columns for each metric.
-
-    Prefers level-prefixed columns (e.g. `L3_Mean_ZQ95`) when `preferred_level`
-    is specified, then looks for clean matches across candidates.
-    """
-    mapping: dict[str, str] = {}
-    cleaned_columns = {col: re.sub(r"[^a-zA-Z0-9]", "", col.lower()) for col in columns}
-
-    for metric in metrics:
-        clean_metric = re.sub(r"[^a-zA-Z0-9]", "", metric.lower())
-        patterns = METRIC_NAME_PATTERNS.get(metric, (metric.lower(),))
-        clean_patterns = [re.sub(r"[^a-zA-Z0-9]", "", p) for p in patterns]
-
-        best_match: str | None = None
-
-        # Level-qualified attempt if preferred_level is given
-        if preferred_level is not None:
-            prefix = f"l{preferred_level}"
-            for col, clean_col in cleaned_columns.items():
-                if clean_col.startswith(prefix):
-                    remainder = clean_col[len(prefix):]
-                    if any(p in remainder for p in clean_patterns) or clean_metric in remainder:
-                        best_match = col
-                        break
-
-        # Fallback to direct pattern match
-        if best_match is None:
-            for col, clean_col in cleaned_columns.items():
-                if any(p in clean_col for p in clean_patterns) or clean_metric in clean_col:
-                    best_match = col
-                    break
-
-        if best_match is not None:
-            mapping[metric] = best_match
-
-    return mapping
-
-
 class DefaultMergeRuleSet(RuleSet):
-    """The default starting rule set for polygon layer merging.
-
-    Performs a direct comparison of zq95, vci_1m, and LMoments (1-4), requiring
-    the absolute difference for each metric to be <= constant threshold (default 0.10).
-    """
+    '''Default starting rule set for polygon layer merging.'''
 
     def __init__(
         self,
@@ -310,7 +279,7 @@ class DefaultMergeRuleSet(RuleSet):
         columns: typing.Sequence[str],
         preferred_level: int | None = None,
     ) -> DefaultMergeRuleSet:
-        """Return a new instance with auto-resolved field mapping for columns."""
+        '''Return a new instance with auto-resolved field mapping.'''
         resolved = auto_resolve_field_mapping(
             columns=columns,
             metrics=self.metrics,
@@ -323,3 +292,69 @@ class DefaultMergeRuleSet(RuleSet):
             field_mapping=merged_mapping,
             per_metric_thresholds=self.per_metric_thresholds,
         )
+
+
+# ----- public functions
+def auto_resolve_field_mapping(
+    columns: typing.Sequence[str],
+    metrics: typing.Sequence[str] = DEFAULT_MERGE_METRICS,
+    preferred_level: int | None = None,
+) -> dict[str, str]:
+    '''
+    Automatically resolve column names in available columns for metrics.
+
+    Prefers level-prefixed columns (e.g. `L3_Mean_ZQ95`) when
+    `preferred_level` is specified.
+
+    Args:
+        columns:
+            Available column names in dataset.
+        metrics:
+            Sequence of metric names to resolve.
+        preferred_level:
+            Optional preferred segmentation level prefix.
+
+    Returns:
+        dict[str, str]:
+            Mapping from metric name to corresponding column name.
+    '''
+    mapping: dict[str, str] = {}
+    cleaned_columns = {
+        col: re.sub(r"[^a-zA-Z0-9]", "", col.lower()) for col in columns
+    }
+
+    for metric in metrics:
+        clean_metric = re.sub(r"[^a-zA-Z0-9]", "", metric.lower())
+        patterns = METRIC_NAME_PATTERNS.get(metric, (metric.lower(),))
+        clean_patterns = [re.sub(r"[^a-zA-Z0-9]", "", p) for p in patterns]
+
+        best_match: str | None = None
+
+        # level-qualified attempt if preferred_level is given
+        if preferred_level is not None:
+            prefix = f"l{preferred_level}"
+            for col, clean_col in cleaned_columns.items():
+                if clean_col.startswith(prefix):
+                    remainder = clean_col[len(prefix):]
+                    if (
+                        any(p in remainder for p in clean_patterns)
+                        or clean_metric in remainder
+                    ):
+                        best_match = col
+                        break
+
+        # fallback to direct pattern match
+        if best_match is None:
+            for col, clean_col in cleaned_columns.items():
+                if (
+                    any(p in clean_col for p in clean_patterns)
+                    or clean_metric in clean_col
+                ):
+                    best_match = col
+                    break
+
+        if best_match is not None:
+            mapping[metric] = best_match
+
+    return mapping
+

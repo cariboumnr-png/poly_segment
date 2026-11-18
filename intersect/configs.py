@@ -19,7 +19,18 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Command-line configuration for polygon-neighbour analysis."""
+'''
+Command-line configuration for polygon-neighbour analysis.
+
+Defines workflow configuration dataclass, attribute fields,
+supported output formats, and command-line argument parser.
+
+Public APIs:
+    - `ATTRIBUTE_FIELDS`: Supported attribute field names.
+    - `OUTPUT_FORMATS`: Mapping of output format names to drivers.
+    - `WorkflowConfig`: Configuration dataclass for intersection run.
+    - `parse_args`: Parse command-line arguments into `WorkflowConfig`.
+'''
 
 # standard imports
 import argparse
@@ -28,8 +39,6 @@ import logging
 import pathlib
 import typing
 
-
-# ----- constants
 ATTRIBUTE_FIELDS: tuple[str, ...] = (
     "Mean_S2_Peak2",
     "Mean_S2_PreLeaf",
@@ -48,8 +57,7 @@ OUTPUT_FORMATS = {
 # ----- public dataclasses
 @dataclasses.dataclass(frozen=True, slots=True)
 class WorkflowConfig:
-    """Configuration for one post-processing run."""
-
+    '''Configuration for one post-processing run.'''
     mu: int
     source_folder: pathlib.Path
     source_gdb_name: str
@@ -63,12 +71,12 @@ class WorkflowConfig:
 
     @property
     def source_dataset(self) -> pathlib.Path:
-        """Return the source File Geodatabase path."""
+        '''Return the source File Geodatabase path.'''
         return self.source_folder / f"{self.source_gdb_name}.gdb"
 
     @property
     def source_layers(self) -> tuple[str, ...]:
-        """Return the four source segmentation layer names."""
+        '''Return the four source segmentation layer names.'''
         return tuple(
             f"{self.source_layer_prefix}_{level}"
             for level in range(1, 5)
@@ -76,34 +84,44 @@ class WorkflowConfig:
 
     @property
     def selected_source_layer(self) -> str:
-        """Return the layer supplying attributes for comparison."""
+        '''Return the layer supplying attributes for comparison.'''
         return self.source_layers[self.object_level_merge - 1]
 
     @property
     def destination_stem(self) -> str:
-        """Return the versioned destination dataset name without extension."""
+        '''Return destination dataset stem without extension.'''
         return f"isi_mu{self.mu}_postOBC_process_ver{self.gdb_version}"
 
     @property
     def destination_dataset(self) -> pathlib.Path:
-        """Return the destination dataset path."""
+        '''Return the destination dataset path.'''
         extension, _ = OUTPUT_FORMATS[self.output_format]
         return self.destination_folder / f"{self.destination_stem}{extension}"
 
     @property
     def intersection_layer(self) -> str:
-        """Return the output intersection layer name."""
+        '''Return the output intersection layer name.'''
         return f"intersected_{self.table_version}"
 
     @property
     def neighbour_table(self) -> str:
-        """Return the output neighbour-table name."""
+        '''Return the output neighbour-table name.'''
         return f"polygon_neighbour_table_{self.table_version}"
 
 
 # ----- public functions
 def parse_args(argv: typing.Sequence[str] | None = None) -> WorkflowConfig:
-    """Parse command-line arguments and return workflow configuration."""
+    '''
+    Parse command-line arguments and return workflow configuration.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+
+    Returns:
+        WorkflowConfig:
+            Resolved workflow configuration instance.
+    '''
     parser = argparse.ArgumentParser(
         description=(
             "Intersect four polygon segmentation levels, identify neighbours, "
@@ -178,3 +196,4 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> WorkflowConfig:
         output_format=args.output_format,
         overwrite=args.overwrite,
     )
+

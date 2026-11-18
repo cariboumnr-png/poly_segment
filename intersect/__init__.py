@@ -20,13 +20,14 @@
 # =========================================================================== #
 
 '''
-Top-level namespace for `landseg.geopipe.prepare.materialize`.
+Top-level namespace for the polygon intersection module.
 
-Exposes block materialization and image normalization pipeline runners
-via lazy resolution.
+Exposes configuration dataclasses and workflow execution runners via
+lazy resolution.
 
 Public APIs:
-    - main: entry point for the application.
+    - `WorkflowConfig`: Configuration dataclass for intersection.
+    - `run_workflow`: Execute polygon-neighbour analysis workflow.
 '''
 
 # standard imports
@@ -47,7 +48,8 @@ if typing.TYPE_CHECKING:
     from .configs import WorkflowConfig
     from .executor import run_workflow
 
-def __getattr__(name: str):
+
+def __getattr__(name: str) -> typing.Any:
     if name in {'WorkflowConfig'}:
         obj = importlib.import_module('.configs', __package__)
         return getattr(obj, name)
@@ -57,3 +59,4 @@ def __getattr__(name: str):
         return getattr(obj, name)
 
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+

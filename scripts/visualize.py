@@ -19,43 +19,42 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Generate visual comparison graphics and interactive HTML for workflow stages.
+'''
+Visual comparison graphics and interactive HTML for workflow stages.
 
-Produces:
-1. High-resolution comparison plot (PNG): 4 raw levels, intersected layer, and merged layer.
-2. Interactive SVG/HTML viewer: inspect polygons with hover tooltips and layer toggles.
+Produces multi-panel comparison plots and interactive SVG/HTML viewers
+to inspect raw segmentation levels, Stage 1 intersections, and Stage 2
+merged polygon stands.
 
-Run from project root:
-
-    python scripts/visualize.py
-"""
-
-from __future__ import annotations
+Public APIs:
+    - `LANDCOVER_COLORS`: Mapping of vegetation classes to hex colors.
+    - `plot_comparison_figure`: Render 2x3 panel comparison graphic.
+    - `generate_interactive_html`: Render self-contained HTML viewer.
+    - `parse_args`: Parse command-line arguments.
+    - `main`: Entry point for script execution.
+'''
 
 # standard imports
+from __future__ import annotations
 import argparse
-import html
 import json
 import logging
 import os
 import pathlib
+import tempfile
 import typing
-
-# Configure matplotlib temporary dir before importing pyplot to avoid Windows sandbox permission warnings
-os.environ.setdefault("MPLCONFIGDIR", str(pathlib.Path("sandbox/.mplconfig").resolve()))
-pathlib.Path("sandbox/.mplconfig").mkdir(parents=True, exist_ok=True)
-
 # third-party imports
 import geopandas
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
+import matplotlib.patches
+import matplotlib.pyplot
 import pyogrio
-
 
 LOGGER = logging.getLogger("poly_segment_visualize")
 
 DEFAULT_SOURCE_GDB = pathlib.Path("sandbox/input/segmentation_R1.gdb")
-DEFAULT_OUTPUT_GDB = pathlib.Path("sandbox/output/isi_mu780_postOBC_process_verdummy_001.gdb")
+DEFAULT_OUTPUT_GDB = pathlib.Path(
+    "sandbox/output/isi_mu780_postOBC_process_verdummy_001.gdb"
+)
 DEFAULT_PNG_PATH = pathlib.Path("sandbox/output/workflow_visualization.png")
 DEFAULT_HTML_PATH = pathlib.Path("sandbox/output/workflow_visualization.html")
 
@@ -67,10 +66,25 @@ LANDCOVER_COLORS = {
 }
 
 
-def parse_args(argv: typing.Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
+# ----- public functions
+def parse_args(
+    argv: typing.Sequence[str] | None = None,
+) -> argparse.Namespace:
+    '''
+    Parse command-line arguments.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+
+    Returns:
+        argparse.Namespace:
+            Parsed command-line arguments.
+    '''
     parser = argparse.ArgumentParser(
-        description="Visualize polygon segmentation, intersection, and merging stages."
+        description=(
+            "Visualize polygon segmentation, intersection, and merging stages."
+        )
     )
     parser.add_argument(
         "--source-gdb",
@@ -99,27 +113,31 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _resolve_layer_color(row: typing.Any, level: int | None = None) -> str:
-    """Extract hex color from row or map from landcover label."""
-    if level is not None and f"L{level}_hex_color" in row:
-        return str(row[f"L{level}_hex_color"])
-    if "hex_color" in row and str(row["hex_color"]).startswith("#"):
-        return str(row["hex_color"])
-    for col in ("landcover", f"L{level}_landcover" if level else "landcover"):
-        if col in row and row[col] in LANDCOVER_COLORS:
-            return LANDCOVER_COLORS[str(row[col])]
-    return "#5c7cfa"
-
-
 def plot_comparison_figure(
     raw_layers: dict[int, geopandas.GeoDataFrame],
     intersected_gdf: geopandas.GeoDataFrame,
     merged_gdf: geopandas.GeoDataFrame,
     output_png: pathlib.Path,
 ) -> None:
-    """Render a 2x3 panel comparison graphic showing workflow progression."""
-    fig, axes = plt.subplots(2, 3, figsize=(18, 11), dpi=200)
-    plt.subplots_adjust(wspace=0.15, hspace=0.25, top=0.92, bottom=0.08)
+    '''
+    Render a 2x3 panel comparison graphic showing workflow progression.
+
+    Args:
+        raw_layers:
+            Mapping of level index to raw input GeoDataFrames.
+        intersected_gdf:
+            Stage 1 intersected polygons GeoDataFrame.
+        merged_gdf:
+            Stage 2 merged polygons GeoDataFrame.
+        output_png:
+            Target image file path on disk.
+    '''
+    os.environ.setdefault("MPLCONFIGDIR", tempfile.gettempdir())
+
+    fig, axes = matplotlib.pyplot.subplots(2, 3, figsize=(18, 11), dpi=200)
+    matplotlib.pyplot.subplots_adjust(
+        wspace=0.15, hspace=0.25, top=0.92, bottom=0.08
+    )
 
     fig.suptitle(
         "Multi-Scale Polygon Segmentation, Intersection & Rule-Based Merging",
@@ -129,12 +147,48 @@ def plot_comparison_figure(
     )
 
     panels = [
-        (axes[0, 0], raw_layers[1], f"Level 1: Coarse Segments ({len(raw_layers[1])} polygons)", 1, False),
-        (axes[0, 1], raw_layers[2], f"Level 2: Medium-Coarse ({len(raw_layers[2])} polygons)", 2, False),
-        (axes[0, 2], raw_layers[3], f"Level 3: Object Merge Level ({len(raw_layers[3])} polygons)", 3, False),
-        (axes[1, 0], raw_layers[4], f"Level 4: Fine Segments ({len(raw_layers[4])} polygons)", 4, False),
-        (axes[1, 1], intersected_gdf, f"Stage 1: Intersected Layers ({len(intersected_gdf)} sub-polygons)", 3, True),
-        (axes[1, 2], merged_gdf, f"Stage 2: Merged Product ({len(merged_gdf)} dissolved stands)", 3, False),
+        (
+            axes[0, 0],
+            raw_layers[1],
+            f"Level 1: Coarse Segments ({len(raw_layers[1])} polygons)",
+            1,
+            False,
+        ),
+        (
+            axes[0, 1],
+            raw_layers[2],
+            f"Level 2: Medium-Coarse ({len(raw_layers[2])} polygons)",
+            2,
+            False,
+        ),
+        (
+            axes[0, 2],
+            raw_layers[3],
+            f"Level 3: Object Merge Level ({len(raw_layers[3])} polygons)",
+            3,
+            False,
+        ),
+        (
+            axes[1, 0],
+            raw_layers[4],
+            f"Level 4: Fine Segments ({len(raw_layers[4])} polygons)",
+            4,
+            False,
+        ),
+        (
+            axes[1, 1],
+            intersected_gdf,
+            f"Stage 1: Intersected ({len(intersected_gdf)} sub-polygons)",
+            3,
+            True,
+        ),
+        (
+            axes[1, 2],
+            merged_gdf,
+            f"Stage 2: Merged Product ({len(merged_gdf)} dissolved stands)",
+            3,
+            False,
+        ),
     ]
 
     for ax, gdf, title, lvl, show_dense_edges in panels:
@@ -143,7 +197,10 @@ def plot_comparison_figure(
         ax.set_xticks([])
         ax.set_yticks([])
 
-        colors = [_resolve_layer_color(row, level=lvl) for _, row in gdf.iterrows()]
+        colors = [
+            _resolve_layer_color(row, level=lvl)
+            for _, row in gdf.iterrows()
+        ]
 
         edge_color = "black" if not show_dense_edges else "#222222"
         linewidth = 0.5 if not show_dense_edges else 0.8
@@ -157,7 +214,7 @@ def plot_comparison_figure(
             alpha=alpha,
         )
 
-        # In the merged layer panel, annotate each stand with its landcover name and area
+        # in merged panel, annotate stands with landcover and area
         if ax == axes[1, 2]:
             for _, row in gdf.iterrows():
                 centroid = row.geometry.centroid
@@ -173,12 +230,16 @@ def plot_comparison_figure(
                     fontsize=8.5,
                     fontweight="bold",
                     color="white",
-                    bbox=dict(boxstyle="round,pad=0.3", fc="black", ec="none", alpha=0.65),
+                    bbox=dict(
+                        boxstyle="round,pad=0.3",
+                        fc="black",
+                        ec="none",
+                        alpha=0.65,
+                    ),
                 )
 
-    # Global legend
     legend_patches = [
-        mpatches.Patch(color=col, label=label)
+        matplotlib.patches.Patch(color=col, label=label)
         for label, col in LANDCOVER_COLORS.items()
     ]
     fig.legend(
@@ -192,8 +253,8 @@ def plot_comparison_figure(
     )
 
     output_png.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_png, bbox_inches="tight")
-    plt.close(fig)
+    matplotlib.pyplot.savefig(output_png, bbox_inches="tight")
+    matplotlib.pyplot.close(fig)
     LOGGER.info("Comparison figure saved to %s", output_png)
 
 
@@ -203,20 +264,47 @@ def generate_interactive_html(
     merged_gdf: geopandas.GeoDataFrame,
     output_html: pathlib.Path,
 ) -> None:
-    """Generate a self-contained interactive SVG visualizer with layer toggles and tooltips."""
-    extent_minx = min(raw_layers[1].total_bounds[0], intersected_gdf.total_bounds[0])
-    extent_miny = min(raw_layers[1].total_bounds[1], intersected_gdf.total_bounds[1])
-    extent_maxx = max(raw_layers[1].total_bounds[2], intersected_gdf.total_bounds[2])
-    extent_maxy = max(raw_layers[1].total_bounds[3], intersected_gdf.total_bounds[3])
+    '''
+    Generate interactive SVG visualizer with toggles and tooltips.
+
+    Args:
+        raw_layers:
+            Mapping of level index to raw input GeoDataFrames.
+        intersected_gdf:
+            Stage 1 intersected polygons GeoDataFrame.
+        merged_gdf:
+            Stage 2 merged polygons GeoDataFrame.
+        output_html:
+            Target HTML file path on disk.
+    '''
+    extent_minx = min(
+        raw_layers[1].total_bounds[0],
+        intersected_gdf.total_bounds[0],
+    )
+    extent_miny = min(
+        raw_layers[1].total_bounds[1],
+        intersected_gdf.total_bounds[1],
+    )
+    extent_maxx = max(
+        raw_layers[1].total_bounds[2],
+        intersected_gdf.total_bounds[2],
+    )
+    extent_maxy = max(
+        raw_layers[1].total_bounds[3],
+        intersected_gdf.total_bounds[3],
+    )
 
     width_m = extent_maxx - extent_minx
     height_m = extent_maxy - extent_miny
     svg_size = 560
 
-    def to_svg_poly(geom: typing.Any) -> str:
+    def to_svg_poly(geom: typing.Any) -> list[str]:
         if geom.is_empty:
-            return ""
-        geoms = geom.geoms if geom.geom_type in ("MultiPolygon", "GeometryCollection") else [geom]
+            return []
+        if geom.geom_type in ("MultiPolygon", "GeometryCollection"):
+            geoms = geom.geoms
+        else:
+            geoms = [geom]
         paths = []
         for g in geoms:
             if g.geom_type != "Polygon":
@@ -236,7 +324,6 @@ def generate_interactive_html(
         "Stage 2: Merged Product": [],
     }
 
-    # Populate layer SVG elements
     dataset_pairs = [
         ("Level 1 (Coarse)", raw_layers[1], 1),
         ("Level 4 (Fine)", raw_layers[4], 4),
@@ -246,12 +333,18 @@ def generate_interactive_html(
 
     for layer_name, gdf, lvl in dataset_pairs:
         items = []
-        for i, row in gdf.iterrows():
+        for _, row in gdf.iterrows():
             poly_tags = to_svg_poly(row.geometry)
             color = _resolve_layer_color(row, level=lvl)
-            landcover = str(row.get("landcover", row.get(f"L{lvl}_landcover", "Stand")))
-            zq95 = float(row.get("Mean_ZQ95", row.get(f"L{lvl}_Mean_ZQ95", 0.0)))
-            vci = float(row.get("Mean_vci_1m", row.get(f"L{lvl}_Mean_vci_1m", 0.0)))
+            landcover = str(
+                row.get("landcover", row.get(f"L{lvl}_landcover", "Stand"))
+            )
+            zq95 = float(
+                row.get("Mean_ZQ95", row.get(f"L{lvl}_Mean_ZQ95", 0.0))
+            )
+            vci = float(
+                row.get("Mean_vci_1m", row.get(f"L{lvl}_Mean_vci_1m", 0.0))
+            )
             parts = int(row.get("num_merged_parts", 1))
             area_m2 = float(row.geometry.area)
 
@@ -267,6 +360,12 @@ def generate_interactive_html(
                 })
         layers_data[layer_name] = items
 
+    legend_items_html = "".join(
+        f'<div class="legend-item"><div class="legend-color" '
+        f'style="background:{col};"></div><span>{label}</span></div>'
+        for label, col in LANDCOVER_COLORS.items()
+    )
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -274,21 +373,21 @@ def generate_interactive_html(
 <title>Polygon Segmentation, Intersection & Merging Visualizer</title>
 <style>
   body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     margin: 0; padding: 24px; background: #0f172a; color: #f8fafc;
   }}
   h1 {{ font-size: 22px; margin-bottom: 6px; font-weight: 700; }}
-  p.subtitle {{ color: #94a3b8; font-size: 14px; margin-top: 0; margin-bottom: 20px; }}
+  p.subtitle {{ color: #94a3b8; font-size: 14px; margin: 0 0 20px 0; }}
   .container {{ display: flex; gap: 24px; max-width: 1200px; margin: 0 auto; }}
   .map-card {{
-    background: #1e293b; border-radius: 12px; padding: 16px; border: 1px solid #334155;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    background: #1e293b; border-radius: 12px; padding: 16px;
+    border: 1px solid #334155; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   }}
   .controls {{ display: flex; gap: 10px; margin-bottom: 12px; }}
   button.tab-btn {{
     background: #334155; color: #cbd5e1; border: none; padding: 8px 14px;
     border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
-    transition: all 0.15s ease-in-out;
   }}
   button.tab-btn.active {{ background: #3b82f6; color: white; }}
   svg.map-svg {{
@@ -296,23 +395,38 @@ def generate_interactive_html(
     cursor: crosshair; display: block;
   }}
   polygon {{
-    stroke: #0f172a; stroke-width: 1; fill-opacity: 0.85; transition: fill-opacity 0.1s, stroke-width 0.1s;
+    stroke: #0f172a; stroke-width: 1; fill-opacity: 0.85;
+    transition: fill-opacity 0.1s, stroke-width 0.1s;
   }}
-  polygon:hover {{
-    fill-opacity: 1.0; stroke: #ffffff; stroke-width: 2.5;
-  }}
+  polygon:hover {{ fill-opacity: 1.0; stroke: #ffffff; stroke-width: 2.5; }}
   .info-panel {{
     width: 380px; background: #1e293b; border-radius: 12px; padding: 20px;
-    border: 1px solid #334155; display: flex; flex-direction: column; justify-content: space-between;
+    border: 1px solid #334155; display: flex; flex-direction: column;
+    justify-content: space-between;
   }}
-  .info-card h3 {{ margin-top: 0; font-size: 16px; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 8px; }}
-  .info-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }}
+  .info-card h3 {{
+    margin-top: 0; font-size: 16px; color: #60a5fa;
+    border-bottom: 1px solid #334155; padding-bottom: 8px;
+  }}
+  .info-row {{
+    display: flex; justify-content: space-between;
+    margin-bottom: 8px; font-size: 13px;
+  }}
   .info-label {{ color: #94a3b8; }}
   .info-value {{ font-weight: 600; color: #f1f5f9; }}
   .legend {{ margin-top: 20px; }}
-  .legend h4 {{ margin: 0 0 10px 0; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }}
-  .legend-item {{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 13px; }}
-  .legend-color {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); }}
+  .legend h4 {{
+    margin: 0 0 10px 0; font-size: 13px; color: #94a3b8;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }}
+  .legend-item {{
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 6px; font-size: 13px;
+  }}
+  .legend-color {{
+    width: 16px; height: 16px; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.2);
+  }}
 </style>
 </head>
 <body>
@@ -334,7 +448,7 @@ def generate_interactive_html(
     </div>
     <div class="legend">
       <h4>Stand Classes</h4>
-      {"".join(f'<div class="legend-item"><div class="legend-color" style="background:{col};"></div><span>{label}</span></div>' for label, col in LANDCOVER_COLORS.items())}
+      {legend_items_html}
     </div>
   </div>
 </div>
@@ -394,7 +508,13 @@ renderMap();
 
 
 def main(argv: typing.Sequence[str] | None = None) -> None:
-    """Run the visualization generator."""
+    '''
+    Run the visualization generator.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+    '''
     args = parse_args(argv)
 
     logging.basicConfig(
@@ -413,16 +533,24 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
 
     LOGGER.info("Loading output layers from %s...", args.output_gdb)
     available = {name for name, _ in pyogrio.list_layers(args.output_gdb)}
-    intersect_candidates = [n for n in available if n.startswith("intersected_")]
-    merge_candidates = [n for n in available if n.startswith("merged_polygons_")]
+    intersect_candidates = [
+        n for n in available if n.startswith("intersected_")
+    ]
+    merge_candidates = [
+        n for n in available if n.startswith("merged_polygons_")
+    ]
 
     if not intersect_candidates:
         raise ValueError(f"No intersected layer found in {args.output_gdb}")
     if not merge_candidates:
         raise ValueError(f"No merged layer found in {args.output_gdb}")
 
-    intersected_gdf = pyogrio.read_dataframe(args.output_gdb, layer=intersect_candidates[0])
-    merged_gdf = pyogrio.read_dataframe(args.output_gdb, layer=merge_candidates[0])
+    intersected_gdf = pyogrio.read_dataframe(
+        args.output_gdb, layer=intersect_candidates[0]
+    )
+    merged_gdf = pyogrio.read_dataframe(
+        args.output_gdb, layer=merge_candidates[0]
+    )
 
     LOGGER.info(
         "Loaded: %d intersection sub-polygons, %d merged polygons.",
@@ -443,6 +571,19 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
         merged_gdf=merged_gdf,
         output_html=args.output_html,
     )
+
+
+# ----- private helpers
+def _resolve_layer_color(row: typing.Any, level: int | None = None) -> str:
+    '''Extract hex color from row or map from landcover label.'''
+    if level is not None and f"L{level}_hex_color" in row:
+        return str(row[f"L{level}_hex_color"])
+    if "hex_color" in row and str(row["hex_color"]).startswith("#"):
+        return str(row["hex_color"])
+    for col in ("landcover", f"L{level}_landcover" if level else "landcover"):
+        if col in row and row[col] in LANDCOVER_COLORS:
+            return LANDCOVER_COLORS[str(row[col])]
+    return "#5c7cfa"
 
 
 if __name__ == "__main__":

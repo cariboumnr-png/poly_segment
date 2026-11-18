@@ -19,16 +19,25 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Spatial operations for multi-layer polygon intersection and rule-based merging."""
+'''
+Spatial operations for polygon intersection and rule-based merging.
 
-from __future__ import annotations
+Provides four-layer polygon intersection, candidate neighbour detection,
+disjoint-set cluster aggregation, and dissolved geometry generation.
+
+Public APIs:
+    - `validate_source_dataset`: Validate source dataset existence.
+    - `intersect_polygon_layers`: Intersect four polygon layers.
+    - `find_candidate_neighbour_pairs`: Find touching neighbour pairs.
+    - `merge_intersected_polygons`: Merge polygons using rule sets.
+'''
 
 # standard imports
+from __future__ import annotations
 from collections import defaultdict
 import logging
 import pathlib
 import typing
-
 # third-party imports
 import geopandas
 import numpy
@@ -37,15 +46,53 @@ import pyogrio
 import pyproj
 import shapely
 import shapely.geometry.base as shapely_base
-
 # local imports
 from .attributes import aggregate_attributes_area_weighted
 from .rules import DefaultMergeRuleSet
 from .rules import MergeRule
 
-
-# ----- constants
 LOGGER = logging.getLogger("poly_segment_merge")
+
+
+# ----- private classes
+class _DisjointSet:
+    '''Disjoint-set with path compression and rank optimization.'''
+    __slots__ = ("parent", "rank")
+
+    def __init__(self, size: int) -> None:
+        self.parent = list(range(size))
+        self.rank = [0] * size
+
+    def find(self, item: int) -> int:
+        root = item
+        while self.parent[root] != root:
+            root = self.parent[root]
+        # path compression
+        curr = item
+        while curr != root:
+            parent_node = self.parent[curr]
+            self.parent[curr] = root
+            curr = parent_node
+        return root
+
+    def union(self, item1: int, item2: int) -> None:
+        root1 = self.find(item1)
+        root2 = self.find(item2)
+        if root1 != root2:
+            if self.rank[root1] < self.rank[root2]:
+                self.parent[root1] = root2
+            elif self.rank[root1] > self.rank[root2]:
+                self.parent[root2] = root1
+            else:
+                self.parent[root2] = root1
+                self.rank[root1] += 1
+
+    def groups(self) -> dict[int, list[int]]:
+        '''Return mapping of root index to list of member indices.'''
+        clusters: dict[int, list[int]] = defaultdict(list)
+        for i in range(len(self.parent)):
+            clusters[self.find(i)].append(i)
+        return clusters
 
 
 # ----- public functions
@@ -53,7 +100,21 @@ def validate_source_dataset(
     source_dataset: pathlib.Path,
     required_layers: typing.Sequence[str],
 ) -> None:
-    """Check that the source dataset and all required layers exist."""
+    '''
+    Check that the source dataset and all required layers exist.
+
+    Args:
+        source_dataset:
+            Path to the source geospatial dataset.
+        required_layers:
+            Sequence of layer names that must exist in dataset.
+
+    Raises:
+        FileNotFoundError:
+            If source dataset does not exist.
+        ValueError:
+            If one or more required layers are missing.
+    '''
     if not source_dataset.exists():
         raise FileNotFoundError(
             f"Source dataset does not exist: {source_dataset}"
@@ -75,9 +136,27 @@ def intersect_polygon_layers(
     source_dataset: pathlib.Path,
     layer_names: typing.Sequence[str],
 ) -> geopandas.GeoDataFrame:
-    """Intersect four polygon layers, retaining source feature IDs and attributes."""
+    '''
+    Intersect four polygon layers, retaining source feature IDs.
+
+    Args:
+        source_dataset:
+            Path to the source geospatial dataset.
+        layer_names:
+            Sequence of four polygon layer names to intersect.
+
+    Returns:
+        geopandas.GeoDataFrame:
+            Intersected polygon layer retaining all attributes.
+
+    Raises:
+        ValueError:
+            If layer count is not 4, CRSs differ, or result is empty.
+    '''
     if len(layer_names) != 4:
-        raise ValueError("Exactly four polygon segmentation layers are required.")
+        raise ValueError(
+            "Exactly four polygon segmentation layers are required."
+        )
 
     LOGGER.info("Reading the four source polygon layers.")
     input_layers = [
@@ -121,31 +200,54 @@ def find_candidate_neighbour_pairs(
     intersection: geopandas.GeoDataFrame,
     min_shared_length: float = 0.0,
 ) -> tuple[numpy.ndarray, numpy.ndarray]:
-    """Find touching candidate neighbour pairs (i, j) where i < j.
+    '''
+    Find touching candidate neighbour pairs (i, j) where i < j.
 
     Optionally filters by minimum shared boundary length in metres.
-    """
+
+    Args:
+        intersection:
+            GeoDataFrame of intersected polygons.
+        min_shared_length:
+            Minimum shared boundary length in metres.
+
+    Returns:
+        tuple[numpy.ndarray, numpy.ndarray]:
+            Tuple of left and right polygon integer index arrays.
+    '''
     geometries = list(intersection.geometry)
     if not geometries:
-        return numpy.empty(0, dtype=numpy.int64), numpy.empty(0, dtype=numpy.int64)
+        return (
+            numpy.empty(0, dtype=numpy.int64),
+            numpy.empty(0, dtype=numpy.int64),
+        )
 
     tree = shapely.STRtree(geometries)
     candidate_pairs = tree.query(geometries, predicate="touches")
 
     if candidate_pairs.size == 0:
-        return numpy.empty(0, dtype=numpy.int64), numpy.empty(0, dtype=numpy.int64)
+        return (
+            numpy.empty(0, dtype=numpy.int64),
+            numpy.empty(0, dtype=numpy.int64),
+        )
 
-    # Keep only undirected pairs where left < right
+    # keep only undirected pairs where left < right
     left_indices = []
     right_indices = []
-    metres_per_unit = _metres_per_crs_unit(intersection.crs) if min_shared_length > 0 else 1.0
+    metres_per_unit = (
+        _metres_per_crs_unit(intersection.crs)
+        if min_shared_length > 0 else 1.0
+    )
 
     for left_idx, right_idx in candidate_pairs.T:
         if left_idx >= right_idx:
             continue
 
         if min_shared_length > 0:
-            shared = geometries[left_idx].boundary.intersection(geometries[right_idx].boundary)
+            shared = (
+                geometries[left_idx]
+                .boundary.intersection(geometries[right_idx].boundary)
+            )
             shared_length_m = float(shared.length * metres_per_unit)
             if shared_length_m < min_shared_length:
                 continue
@@ -165,18 +267,30 @@ def merge_intersected_polygons(
     object_level: int = 3,
     min_shared_length: float = 0.0,
 ) -> geopandas.GeoDataFrame:
-    """Merge adjacent intersected polygons according to the injected rule set.
+    '''
+    Merge adjacent intersected polygons using injected rule set.
 
-    1. Identifies candidate spatial neighbours sharing boundary.
-    2. Evaluates the candidate pairs against the injected rule set.
-    3. Builds connected components of permitted merges.
-    4. Geometrically dissolves each component and aggregates attributes.
-    """
+    Args:
+        intersection:
+            GeoDataFrame of intersected polygon features.
+        rule_set:
+            Configured merge rule evaluating neighbour pairs.
+        object_level:
+            Target segmentation level supplying attributes.
+        min_shared_length:
+            Minimum shared boundary length in metres.
+
+    Returns:
+        geopandas.GeoDataFrame:
+            Merged polygon layer with aggregated attributes.
+    '''
     if intersection.empty:
-        LOGGER.warning("Intersection GeoDataFrame is empty; returning empty GeoDataFrame.")
+        LOGGER.warning(
+            "Intersection GeoDataFrame is empty; returning copy."
+        )
         return intersection.copy()
 
-    # Automatically resolve column mapping if using DefaultMergeRuleSet without explicit mapping
+    # automatically resolve column mapping if using DefaultMergeRuleSet
     effective_rule_set = rule_set
     if isinstance(rule_set, DefaultMergeRuleSet):
         effective_rule_set = rule_set.with_resolved_mapping(
@@ -196,12 +310,15 @@ def merge_intersected_polygons(
         sources_df = intersection.iloc[left_idx].reset_index(drop=True)
         candidates_df = intersection.iloc[right_idx].reset_index(drop=True)
 
-        can_merge_mask = effective_rule_set.evaluate_batch(sources_df, candidates_df)
+        can_merge_mask = effective_rule_set.evaluate_batch(
+            sources_df, candidates_df
+        )
         permitted_left = left_idx[can_merge_mask]
         permitted_right = right_idx[can_merge_mask]
 
         LOGGER.info(
-            "Evaluated %d candidate neighbour pairs; %d permitted to merge under %s.",
+            "Evaluated %d candidate neighbour pairs; %d permitted to merge "
+            "under %s.",
             len(left_idx),
             len(permitted_left),
             rule_set.name,
@@ -219,13 +336,19 @@ def merge_intersected_polygons(
         len(clusters),
     )
 
-    # Classify columns for aggregation
+    # classify columns for aggregation
     geom_col = intersection.geometry.name
-    id_cols = [c for c in intersection.columns if c.startswith("FID_") or c.endswith("_id")]
+    id_cols = [
+        c for c in intersection.columns
+        if c.startswith("FID_") or c.endswith("_id")
+    ]
     color_and_class_cols = [
         c for c in intersection.columns
         if c in ("landcover", "hex_color", "color_r", "color_g", "color_b")
-        or any(c.endswith(f"_{s}") for s in ("landcover", "hex_color", "color_r", "color_g", "color_b"))
+        or any(
+            c.endswith(f"_{s}")
+            for s in ("landcover", "hex_color", "color_r", "color_g", "color_b")
+        )
     ]
     numeric_cols = [
         c for c in intersection.columns
@@ -266,7 +389,7 @@ def merge_intersected_polygons(
 
     result_df = pandas.DataFrame.from_records(merged_records)
 
-    # Promote top-level thematic class and color fields from selected object level
+    # promote thematic class and color fields from selected level
     for key in ("landcover", "hex_color", "color_r", "color_g", "color_b"):
         lvl_key = f"L{object_level}_{key}"
         if lvl_key in result_df.columns and key not in result_df.columns:
@@ -287,7 +410,7 @@ def _read_intersection_input(
     layer_name: str,
     level: int,
 ) -> geopandas.GeoDataFrame:
-    """Read one polygon layer and qualify its attributes by segmentation level."""
+    '''Read polygon layer and qualify attributes by level.'''
     frame = pyogrio.read_dataframe(
         source_dataset,
         layer=layer_name,
@@ -312,7 +435,7 @@ def _validate_polygon_geometries(
     frame: geopandas.GeoDataFrame,
     layer_name: str,
 ) -> None:
-    """Validate polygon geometry and feature identifiers for one input layer."""
+    '''Validate polygon geometry and feature identifiers for layer.'''
     if frame.crs is None:
         raise ValueError(
             f"Layer {layer_name!r} has no coordinate reference system."
@@ -344,8 +467,10 @@ def _validate_polygon_geometries(
         raise ValueError(f"Layer {layer_name!r} contains null feature IDs.")
 
 
-def _extract_polygonal(geometry: shapely_base.BaseGeometry) -> shapely_base.BaseGeometry:
-    """Ensure geometry consists only of Polygon or MultiPolygon components."""
+def _extract_polygonal(
+    geometry: shapely_base.BaseGeometry,
+) -> shapely_base.BaseGeometry:
+    '''Ensure geometry consists only of polygon components.'''
     if geometry.is_empty:
         return geometry
 
@@ -365,7 +490,7 @@ def _extract_polygonal(geometry: shapely_base.BaseGeometry) -> shapely_base.Base
 
 
 def _metres_per_crs_unit(crs_input: object) -> float:
-    """Return the linear-unit conversion factor for a projected CRS."""
+    '''Return linear-unit conversion factor for a projected CRS.'''
     crs = pyproj.CRS.from_user_input(crs_input)
     if not crs.is_projected:
         raise ValueError(
@@ -382,43 +507,3 @@ def _metres_per_crs_unit(crs_input: object) -> float:
 
     return float(conversion_factor)
 
-
-class _DisjointSet:
-    """Disjoint-set (Union-Find) with path compression and rank optimization."""
-
-    __slots__ = ("parent", "rank")
-
-    def __init__(self, size: int) -> None:
-        self.parent = list(range(size))
-        self.rank = [0] * size
-
-    def find(self, item: int) -> int:
-        root = item
-        while self.parent[root] != root:
-            root = self.parent[root]
-        # Path compression
-        curr = item
-        while curr != root:
-            parent_node = self.parent[curr]
-            self.parent[curr] = root
-            curr = parent_node
-        return root
-
-    def union(self, item1: int, item2: int) -> None:
-        root1 = self.find(item1)
-        root2 = self.find(item2)
-        if root1 != root2:
-            if self.rank[root1] < self.rank[root2]:
-                self.parent[root1] = root2
-            elif self.rank[root1] > self.rank[root2]:
-                self.parent[root2] = root1
-            else:
-                self.parent[root2] = root1
-                self.rank[root1] += 1
-
-    def groups(self) -> dict[int, list[int]]:
-        """Return mapping of root index to list of member indices."""
-        clusters: dict[int, list[int]] = defaultdict(list)
-        for i in range(len(self.parent)):
-            clusters[self.find(i)].append(i)
-        return clusters

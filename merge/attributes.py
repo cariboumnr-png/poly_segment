@@ -19,30 +19,57 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Attribute extraction, validation, and aggregation for polygon merging."""
+'''
+Attribute reading, validation, and aggregation for polygon merging.
 
-from __future__ import annotations
+Provides extraction of numeric attributes from source layers and
+area-weighted attribute aggregation across merged polygon clusters.
+
+Public APIs:
+    - `read_source_attributes`: Read and validate numeric attributes.
+    - `aggregate_attributes_area_weighted`: Compute averages.
+'''
 
 # standard imports
+from __future__ import annotations
 import logging
 import pathlib
 import typing
-
 # third-party imports
 import numpy
 import pandas
 import pyogrio
 
-
 LOGGER = logging.getLogger("poly_segment_merge")
 
 
+# ----- public functions
 def read_source_attributes(
     source_dataset: pathlib.Path,
     layer_name: str,
     attribute_fields: typing.Sequence[str],
 ) -> pandas.DataFrame:
-    """Read and validate numeric attributes from a source layer."""
+    '''
+    Read and validate numeric attributes from a source layer.
+
+    Args:
+        source_dataset:
+            Path to the source geospatial dataset.
+        layer_name:
+            Target layer name containing attributes.
+        attribute_fields:
+            Sequence of numeric attribute field names to read.
+
+    Returns:
+        pandas.DataFrame:
+            Table of numeric attributes indexed by feature ID.
+
+    Raises:
+        ValueError:
+            If required attributes are missing or feature IDs invalid.
+        TypeError:
+            If attribute columns contain non-numeric values.
+    '''
     attributes = pyogrio.read_dataframe(
         source_dataset,
         layer=layer_name,
@@ -83,10 +110,25 @@ def aggregate_attributes_area_weighted(
     numeric_columns: typing.Sequence[str],
     id_columns: typing.Sequence[str] | None = None,
 ) -> dict[str, object]:
-    """Compute area-weighted averages for numeric columns across a merged cluster.
+    '''
+    Compute area-weighted averages for numeric columns across a cluster.
 
     For ID columns, keeps the ID associated with the largest area part.
-    """
+
+    Args:
+        records_df:
+            DataFrame containing attributes for member features.
+        areas:
+            Array of polygon surface areas in square metres.
+        numeric_columns:
+            Sequence of column names to average with area weighting.
+        id_columns:
+            Optional sequence of ID or classification columns.
+
+    Returns:
+        dict[str, object]:
+            Aggregated attribute dictionary for the merged polygon.
+    '''
     total_area = float(numpy.sum(areas))
     aggregated: dict[str, object] = {
         "num_merged_parts": int(len(records_df)),
@@ -99,11 +141,12 @@ def aggregate_attributes_area_weighted(
             vals = records_df[col].to_numpy(dtype="float64")
             valid = ~numpy.isnan(vals)
             if numpy.any(valid):
-                # Normalize weights of valid values
+                # normalize weights of valid values
                 val_weights = weights[valid]
                 sum_w = numpy.sum(val_weights)
                 if sum_w > 0:
-                    aggregated[col] = float(numpy.sum(vals[valid] * val_weights) / sum_w)
+                    weighted_val = numpy.sum(vals[valid] * val_weights) / sum_w
+                    aggregated[col] = float(weighted_val)
                 else:
                     aggregated[col] = float("nan")
             else:
@@ -118,3 +161,4 @@ def aggregate_attributes_area_weighted(
             aggregated[col] = records_df[col].iloc[largest_part_idx]
 
     return aggregated
+

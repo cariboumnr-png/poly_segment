@@ -19,24 +19,40 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Shared pytest fixtures for the poly_segment test suite."""
+'''
+Shared pytest fixtures for the polygon segmentation test suite.
 
+Provides session- and module-scoped synthetic datasets for testing
+spatial operations, rule evaluations, and complete workflows.
+
+Public APIs:
+    - `synthetic_data`: Fixture providing synthetic dataset.
+'''
+
+# standard imports
 import pathlib
+# third-party imports
 import pytest
-
+# local imports
 from scripts.generate_dummy_data import generate_dummy_dataset
 
 
+# ----- shared fixtures
 @pytest.fixture(scope="module")
-def synthetic_data(tmp_path_factory: pytest.TempPathFactory) -> tuple[pathlib.Path, pathlib.Path]:
-    """
-    Given:
-        A temporary test directory provided by pytest.
-    When:
-        generate_dummy_dataset creates synthetic 4-layer polygon segmentation data.
-    Then:
-        A tuple of (temporary_directory, source_gdb_path) is returned for test use.
-    """
+def synthetic_data(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[pathlib.Path, pathlib.Path]:
+    '''
+    Generate synthetic 4-layer polygon segmentation dataset.
+
+    Args:
+        tmp_path_factory:
+            Pytest factory for generating unique temporary directories.
+
+    Returns:
+        tuple[pathlib.Path, pathlib.Path]:
+            Tuple of temporary root directory and source GDB path.
+    '''
     tmp_dir = tmp_path_factory.mktemp("merge_test_data")
     source_gdb = tmp_dir / "test_segmentation.gdb"
     generate_dummy_dataset(
@@ -45,3 +61,4 @@ def synthetic_data(tmp_path_factory: pytest.TempPathFactory) -> tuple[pathlib.Pa
         overwrite=True,
     )
     return tmp_dir, source_gdb
+

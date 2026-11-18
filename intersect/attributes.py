@@ -19,7 +19,17 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Read source attributes and enrich polygon-neighbour relationships."""
+'''
+Attribute reading and enrichment for polygon neighbour analysis.
+
+Reads source layer numeric attributes and enriches neighbour pairs
+with symmetric absolute difference ratios.
+
+Public APIs:
+    - `read_comparison_attributes`: Read and validate attributes.
+    - `enrich_neighbours_with_attributes`: Enrich neighbour pairs with
+      attribute ratios.
+'''
 
 # standard imports
 import pathlib
@@ -35,7 +45,27 @@ def read_comparison_attributes(
     layer_name: str,
     attribute_fields: typing.Sequence[str],
 ) -> pandas.DataFrame:
-    """Read and validate the numeric attributes used in the comparison."""
+    '''
+    Read and validate numeric attributes used in neighbour comparison.
+
+    Args:
+        source_dataset:
+            Path to the source geospatial dataset.
+        layer_name:
+            Target layer name containing attributes.
+        attribute_fields:
+            Sequence of numeric attribute field names to read.
+
+    Returns:
+        pandas.DataFrame:
+            Table of numeric attributes indexed by feature ID.
+
+    Raises:
+        ValueError:
+            If required attributes are missing or feature IDs invalid.
+        TypeError:
+            If attribute columns contain non-numeric values.
+    '''
     attributes = pyogrio.read_dataframe(
         source_dataset,
         layer=layer_name,
@@ -76,7 +106,27 @@ def enrich_neighbours_with_attributes(
     object_id_field: str,
     attribute_fields: typing.Sequence[str],
 ) -> pandas.DataFrame:
-    """Join selected-level attributes to both sides of each neighbour pair."""
+    '''
+    Join attributes to both sides of pair and compute ratios.
+
+    Args:
+        neighbours:
+            Table containing source and neighbour identifier columns.
+        attributes:
+            Table of numeric attributes indexed by feature ID.
+        object_id_field:
+            Column name prefix representing object identifier.
+        attribute_fields:
+            Sequence of numeric attribute names to compare.
+
+    Returns:
+        pandas.DataFrame:
+            Neighbour table enriched with attribute columns and ratios.
+
+    Raises:
+        ValueError:
+            If neighbour object IDs cannot be resolved to attributes.
+    '''
     result = neighbours.copy()
     attribute_lookup = attributes.copy().reset_index(drop=True)
     attribute_lookup.insert(0, "_object_id", attributes.index.to_numpy())
@@ -111,9 +161,9 @@ def enrich_neighbours_with_attributes(
         source_values = result[f"src_{field}"]
         neighbour_values = result[f"nbr_{field}"]
 
-        # Use the mean absolute magnitude as the denominator. This keeps the
-        # symmetric relative difference non-negative for signed values (e.g.
-        # Mean_TPI) and leaves both-zero or missing pairs undefined (NULL).
+        # use mean absolute magnitude as denominator. This keeps the
+        # symmetric relative difference non-negative for signed values
+        # (e.g. `Mean_TPI`) and leaves both-zero pairs undefined.
         denominator = (source_values.abs() + neighbour_values.abs()) / 2.0
         denominator = denominator.mask(denominator == 0)
         result[f"src_nbr_abs_ratio_{field}"] = (
@@ -121,3 +171,4 @@ def enrich_neighbours_with_attributes(
         )
 
     return result
+

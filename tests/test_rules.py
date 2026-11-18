@@ -19,62 +19,67 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Unit tests for merge rules and rule sets."""
+'''
+Unit tests for merge rules and rule sets.
 
+Validates single-pair evaluation, vectorized batch evaluation, composite
+rule sets under 'all' and 'any' modes, and automatic field resolution.
+'''
+
+# third-party imports
 import numpy
 import pandas
-
-from merge.rules import (
-    DefaultMergeRuleSet,
-    MetricDifferenceRule,
-    RuleSet,
-    auto_resolve_field_mapping,
-)
+# local imports
+from merge.rules import DefaultMergeRuleSet
+from merge.rules import MetricDifferenceRule
+from merge.rules import RuleSet
+from merge.rules import auto_resolve_field_mapping
 
 
-def test_metric_difference_rule_single():
-    """
+# ----- test cases
+def test_metric_difference_rule_single() -> None:
+    '''
+    Validate single-pair evaluation across differences and nulls.
+
     Given:
-        A MetricDifferenceRule configured for 'zq95' and 'vci_1m' with a threshold of 0.10.
+        A `MetricDifferenceRule` for metrics (threshold 0.10).
     When:
-        Single-pair candidate neighbour attributes are evaluated across valid differences,
-        exceeding differences, NaN attributes, and missing fields.
+        Single-pair candidate neighbour attributes are evaluated.
     Then:
-        Only pairs where all metric differences are <= 0.10 return True, while
-        exceeding, NaN, and missing attributes return False.
-    """
+        Only pairs where all differences are <= 0.10 return True.
+    '''
     metrics = ("zq95", "vci_1m")
     rule = MetricDifferenceRule(metrics=metrics, threshold=0.10)
 
-    # Within threshold on both
+    # within threshold on both
     source = {"zq95": 10.05, "vci_1m": 0.52}
     cand = {"zq95": 10.00, "vci_1m": 0.50}
     assert rule.can_merge(source, cand) is True
 
-    # Exceeds threshold on one metric
+    # exceeds threshold on one metric
     cand_fail = {"zq95": 10.20, "vci_1m": 0.50}
     assert rule.can_merge(source, cand_fail) is False
 
-    # NaN attribute
+    # `NaN` attribute
     cand_nan = {"zq95": float("nan"), "vci_1m": 0.50}
     assert rule.can_merge(source, cand_nan) is False
 
-    # Missing attribute
+    # missing attribute
     cand_missing = {"zq95": 10.00}
     assert rule.can_merge(source, cand_missing) is False
 
 
-def test_metric_difference_rule_batch():
-    """
+def test_metric_difference_rule_batch() -> None:
+    '''
+    Validate vectorized batch evaluation of candidate pairs.
+
     Given:
-        A MetricDifferenceRule configured for ('zq95', 'vci_1m', 'LMoment1') and threshold 0.10,
-        and parallel source and candidate DataFrames containing 4 candidate pairs.
+        A `MetricDifferenceRule` configured for three metrics and 0.10.
     When:
         Vectorized evaluation via evaluate_batch is executed.
     Then:
-        A 1-D boolean array is returned identifying exactly which pairs satisfied all
-        metric thresholds and non-null constraints.
-    """
+        A 1-D boolean array is returned identifying qualifying pairs.
+    '''
     metrics = ("zq95", "vci_1m", "LMoment1")
     rule = MetricDifferenceRule(metrics=metrics, threshold=0.10)
 
@@ -84,8 +89,8 @@ def test_metric_difference_rule_batch():
         "LMoment1": [1.0, 1.0, 1.0, 1.0],
     })
     candidates = pandas.DataFrame({
-        "zq95": [10.08, 10.15, 10.05, 10.0],  # row 1 exceeds threshold (0.15 > 0.10)
-        "vci_1m": [0.55, 0.52, 0.65, 0.5],   # row 2 exceeds threshold (0.15 > 0.10)
+        "zq95": [10.08, 10.15, 10.05, 10.0],  # row 1 exceeds (0.15 > 0.10)
+        "vci_1m": [0.55, 0.52, 0.65, 0.5],   # row 2 exceeds (0.15 > 0.10)
         "LMoment1": [1.02, 1.01, 1.03, 1.0],
     })
 
@@ -93,17 +98,18 @@ def test_metric_difference_rule_batch():
     assert numpy.array_equal(result, numpy.array([True, False, False, False]))
 
 
-def test_rule_set_modes():
-    """
+def test_rule_set_modes() -> None:
+    '''
+    Validate composite RuleSet under 'all' and 'any' combination modes.
+
     Given:
-        Two distinct MetricDifferenceRules ('zq95' threshold 0.10, 'vci_1m' threshold 0.05)
-        and candidate pairs where each passes only one of the two rules.
+        Two distinct `MetricDifferenceRule` instances.
     When:
-        RuleSet evaluates candidate pairs under 'all' and 'any' combination modes.
+        `RuleSet` evaluates pairs under 'all' and 'any' modes.
     Then:
-        Mode 'all' requires both rules to pass (returning all False), while mode 'any'
-        permits either rule to pass (returning all True).
-    """
+        Mode 'all' requires both rules to pass, while mode 'any' permits
+        either rule to pass.
+    '''
     r1 = MetricDifferenceRule(metrics=("zq95",), threshold=0.10)
     r2 = MetricDifferenceRule(metrics=("vci_1m",), threshold=0.05)
 
@@ -116,14 +122,14 @@ def test_rule_set_modes():
         "vci_1m": [0.60, 0.52],  # row 0 fails r2, row 1 passes r2
     })
 
-    # Mode "all": both must pass -> both fail
+    # mode "all": both must pass -> both fail
     ruleset_all = RuleSet([r1, r2], mode="all")
     assert numpy.array_equal(
         ruleset_all.evaluate_batch(sources, candidates),
         numpy.array([False, False]),
     )
 
-    # Mode "any": either can pass -> both pass
+    # mode "any": either can pass -> both pass
     ruleset_any = RuleSet([r1, r2], mode="any")
     assert numpy.array_equal(
         ruleset_any.evaluate_batch(sources, candidates),
@@ -131,15 +137,17 @@ def test_rule_set_modes():
     )
 
 
-def test_auto_resolve_field_mapping():
-    """
+def test_auto_resolve_field_mapping() -> None:
+    '''
+    Validate auto-resolution of level-prefixed attribute columns.
+
     Given:
-        A collection of layer attribute column names prefixed by segmentation level (e.g., L3_Mean_ZQ95).
+        Layer attribute column names prefixed by segmentation level.
     When:
-        auto_resolve_field_mapping is called with a preferred level of 3 for the default merge metrics.
+        `auto_resolve_field_mapping` is called with preferred level 3.
     Then:
-        A dictionary mapping standard metric names to their corresponding L3-prefixed column names is returned.
-    """
+        A dictionary mapping standard metrics to L3 columns is returned.
+    '''
     columns = [
         "L1_Mean_ZQ95", "L3_Mean_ZQ95",
         "L3_Mean_vci_1m",
@@ -156,17 +164,20 @@ def test_auto_resolve_field_mapping():
     assert mapping["LMoment4"] == "L3_Mean_LMoment4"
 
 
-def test_default_merge_rule_set():
-    """
+def test_default_merge_rule_set() -> None:
+    '''
+    Validate DefaultMergeRuleSet metric initialization.
+
     Given:
-        DefaultMergeRuleSet initialized with a threshold of 0.10.
+        `DefaultMergeRuleSet` initialized with a threshold of 0.10.
     When:
-        The instance configuration and metric specifications are inspected.
+        The instance configuration is inspected.
     Then:
-        The rule set contains exactly the 6 required metrics ('zq95', 'vci_1m', and 'LMoment1' through 'LMoment4').
-    """
+        The rule set contains exactly the 6 required standard metrics.
+    '''
     rule_set = DefaultMergeRuleSet(threshold=0.10)
     assert len(rule_set.metrics) == 6
     assert "zq95" in rule_set.metrics
     assert "vci_1m" in rule_set.metrics
     assert "LMoment1" in rule_set.metrics
+

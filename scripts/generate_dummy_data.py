@@ -19,25 +19,18 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""
+'''
 Generate synthetic polygon layers for workflow integration testing.
 
-Generates realistic organic polygon segmentations using Lloyd-relaxed Voronoi
-tessellations with distinct forest stand profiles and visual color mappings,
-or traditional rectangular grids.
+Generates realistic organic polygon segmentations using Lloyd-relaxed
+Voronoi tessellations with distinct forest stand profiles and visual
+color mappings, or traditional rectangular grids.
 
-Run from the project root:
-
-    python scripts/generate_dummy_data.py
-
-Replace an existing dummy source dataset:
-
-    python scripts/generate_dummy_data.py --overwrite
-
-Use traditional rectangular grid:
-
-    python scripts/generate_dummy_data.py --overwrite --pattern grid
-"""
+Public APIs:
+    - `generate_dummy_dataset`: Build synthetic 4-layer dataset.
+    - `parse_args`: Parse command-line arguments.
+    - `main`: Entry point for script execution.
+'''
 
 # standard imports
 import argparse
@@ -45,14 +38,12 @@ import logging
 import pathlib
 import shutil
 import typing
-
 # third-party imports
 import geopandas
 import numpy
 import pyogrio
 import shapely
 import shapely.geometry
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -84,7 +75,7 @@ ATTRIBUTE_FIELDS = (
 LAYER_ORGANIC_COUNTS = (6, 12, 24, 45)
 LAYER_GRID_SHAPES = ((2, 2), (3, 3), (4, 4), (5, 5))
 
-# Four realistic vegetation stand profiles with thematic color mappings
+# four realistic vegetation stand profiles with thematic color mappings
 ZONE_PROFILES = [
     {
         "name": "Mature Conifer",
@@ -98,7 +89,7 @@ ZONE_PROFILES = [
         "s2_preleaf": 620.0,
         "s2_senes": 730.0,
         "tpi": 12.0,
-        "color": "#1e5631",  # Deep forest green
+        "color": "#1e5631",  # deep forest green
         "rgb": (30, 86, 49),
     },
     {
@@ -113,7 +104,7 @@ ZONE_PROFILES = [
         "s2_preleaf": 980.0,
         "s2_senes": 1150.0,
         "tpi": 4.5,
-        "color": "#4c9a2a",  # Vibrant foliage green
+        "color": "#4c9a2a",  # vibrant foliage green
         "rgb": (76, 154, 42),
     },
     {
@@ -128,7 +119,7 @@ ZONE_PROFILES = [
         "s2_preleaf": 1250.0,
         "s2_senes": 1400.0,
         "tpi": -2.0,
-        "color": "#8dc63f",  # Fresh lime green
+        "color": "#8dc63f",  # fresh lime green
         "rgb": (141, 198, 63),
     },
     {
@@ -143,23 +134,34 @@ ZONE_PROFILES = [
         "s2_preleaf": 820.0,
         "s2_senes": 880.0,
         "tpi": -8.5,
-        "color": "#e5c158",  # Warm golden amber
+        "color": "#e5c158",  # warm golden amber
         "rgb": (229, 193, 88),
     },
 ]
 
 ZONE_CENTERS = [
-    (0.28, 0.72),  # Northwest: Mature Conifer
-    (0.72, 0.70),  # Northeast: Mixed Forest
-    (0.70, 0.28),  # Southeast: Regenerating Forest
-    (0.25, 0.25),  # Southwest: Wetland Meadow
+    (0.28, 0.72),  # northwest: mature conifer
+    (0.72, 0.70),  # northeast: mixed forest
+    (0.70, 0.28),  # southeast: regenerating forest
+    (0.25, 0.25),  # southwest: wetland meadow
 ]
 
 
+# ----- public functions
 def parse_args(
     argv: typing.Sequence[str] | None = None,
 ) -> argparse.Namespace:
-    """Parse command-line arguments."""
+    '''
+    Parse command-line arguments.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+
+    Returns:
+        argparse.Namespace:
+            Parsed command-line arguments.
+    '''
     parser = argparse.ArgumentParser(
         description="Generate four synthetic polygon segmentation layers."
     )
@@ -178,7 +180,7 @@ def parse_args(
         "--pattern",
         choices=("organic", "grid"),
         default="organic",
-        help="Pattern type: 'organic' (Voronoi stands) or 'grid' (rectangular).",
+        help="Pattern: 'organic' (Voronoi stands) or 'grid' (rectangular).",
     )
     parser.add_argument(
         "--overwrite",
@@ -188,8 +190,101 @@ def parse_args(
     return parser.parse_args(argv)
 
 
-def remove_dataset(path: pathlib.Path) -> None:
-    """Remove a vector dataset and common SQLite sidecar files."""
+def generate_dummy_dataset(
+    source_dataset: pathlib.Path,
+    layer_prefix: str,
+    pattern: str = "organic",
+    overwrite: bool = False,
+) -> None:
+    '''
+    Generate four synthetic source polygon layers.
+
+    Args:
+        source_dataset:
+            Path to destination File Geodatabase.
+        layer_prefix:
+            Prefix string for the four segmentation layers.
+        pattern:
+            Generation pattern ('organic' or 'grid').
+        overwrite:
+            Whether to overwrite an existing destination dataset.
+
+    Raises:
+        FileExistsError:
+            If source dataset exists and overwrite is False.
+    '''
+    layer_options = _validate_environment()
+    source_dataset = source_dataset.resolve()
+
+    if source_dataset.exists():
+        if not overwrite:
+            raise FileExistsError(
+                f"Source dataset already exists: {source_dataset}. "
+                "Use --overwrite to replace it."
+            )
+        _remove_dataset(source_dataset)
+
+    source_dataset.parent.mkdir(parents=True, exist_ok=True)
+
+    for level in range(1, 5):
+        layer_name = f"{layer_prefix}_{level}"
+        if pattern == "organic":
+            n_pts = LAYER_ORGANIC_COUNTS[level - 1]
+            frame = _create_organic_layer(n_points=n_pts, level=level)
+        else:
+            rows, cols = LAYER_GRID_SHAPES[level - 1]
+            frame = _create_grid(rows=rows, columns=cols, level=level)
+
+        LOGGER.info(
+            "Writing %s with %d polygons (%s pattern).",
+            layer_name,
+            len(frame),
+            pattern,
+        )
+
+        pyogrio.write_dataframe(
+            frame,
+            source_dataset,
+            layer=layer_name,
+            driver="OpenFileGDB",
+            append=source_dataset.exists(),
+            promote_to_multi=True,
+            layer_options=layer_options,
+        )
+
+    LOGGER.info(
+        "Synthetic source dataset written to %s.",
+        source_dataset,
+    )
+
+
+def main(argv: typing.Sequence[str] | None = None) -> None:
+    '''
+    Generate the dummy source dataset.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+    '''
+    args = parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    generate_dummy_dataset(
+        source_dataset=args.source_dataset,
+        layer_prefix=args.layer_prefix,
+        pattern=args.pattern,
+        overwrite=args.overwrite,
+    )
+
+
+# ----- private helpers
+def _remove_dataset(path: pathlib.Path) -> None:
+    '''Remove a vector dataset and common SQLite sidecar files.'''
     if path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
@@ -201,8 +296,8 @@ def remove_dataset(path: pathlib.Path) -> None:
             sidecar.unlink()
 
 
-def validate_environment() -> dict[str, str] | None:
-    """Validate File Geodatabase support and return layer options."""
+def _validate_environment() -> dict[str, str] | None:
+    '''Validate File Geodatabase support and return layer options.'''
     writable_drivers = pyogrio.list_drivers(write=True)
 
     if "OpenFileGDB" not in writable_drivers:
@@ -214,7 +309,7 @@ def validate_environment() -> dict[str, str] | None:
     if pyogrio.__gdal_version__ < (3, 6, 0):
         raise RuntimeError(
             "Creating a File Geodatabase through OpenFileGDB requires "
-            f"GDAL >= 3.6; installed version: {pyogrio.__gdal_version_string__}."
+            f"GDAL >= 3.6; installed: {pyogrio.__gdal_version_string__}."
         )
 
     if pyogrio.__gdal_version__ >= (3, 9, 0):
@@ -225,17 +320,17 @@ def validate_environment() -> dict[str, str] | None:
     return None
 
 
-def create_organic_layer(
+def _create_organic_layer(
     n_points: int,
     level: int,
     seed: int = 42,
 ) -> geopandas.GeoDataFrame:
-    """Create one realistic organic polygon segmentation layer using Lloyd Voronoi."""
+    '''Create one realistic organic polygon segmentation layer.'''
     min_x, min_y, max_x, max_y = EXTENT
     box = shapely.geometry.box(min_x, min_y, max_x, max_y)
     rng = numpy.random.default_rng(seed + level * 100)
 
-    # Initial random points
+    # initial random points
     pts = [
         shapely.geometry.Point(x, y)
         for x, y in zip(
@@ -244,7 +339,8 @@ def create_organic_layer(
         )
     ]
 
-    # Two Lloyd relaxation iterations to produce well-formed, natural cells
+    # two Lloyd relaxation iterations to produce natural cells
+    cells = []
     for _ in range(2):
         vor = shapely.voronoi_polygons(shapely.MultiPoint(pts), extend_to=box)
         cells = [
@@ -261,7 +357,7 @@ def create_organic_layer(
         u = (centroid.x - min_x) / (max_x - min_x)
         v = (centroid.y - min_y) / (max_y - min_y)
 
-        # Assign to nearest stand center
+        # assign to nearest stand center
         dists = [
             ((u - cx) ** 2 + (v - cy) ** 2) ** 0.5
             for cx, cy in ZONE_CENTERS
@@ -269,8 +365,7 @@ def create_organic_layer(
         zone_id = int(numpy.argmin(dists))
         z = ZONE_PROFILES[zone_id]
 
-        # Subtle intra-zone noise in [-0.025, 0.025] so adjacent polygons
-        # within the same zone have differences <= 0.05 (below the 0.10 threshold)
+        # subtle intra-zone noise so adjacent polygons in same zone pass
         noise = (rng.random(6) - 0.5) * 0.05
 
         records.append(
@@ -280,7 +375,9 @@ def create_organic_layer(
                 "row_number": int(v * 4),
                 "column_number": int(u * 4),
                 "Mean_S2_Peak2": float(z["s2_peak2"] + rng.uniform(-15, 15)),
-                "Mean_S2_PreLeaf": float(z["s2_preleaf"] + rng.uniform(-15, 15)),
+                "Mean_S2_PreLeaf": float(
+                    z["s2_preleaf"] + rng.uniform(-15, 15)
+                ),
                 "Mean_S2_Senes": float(z["s2_senes"] + rng.uniform(-15, 15)),
                 "Mean_TPI": float(z["tpi"] + rng.uniform(-0.5, 0.5)),
                 "Mean_vci_1m": float(z["vci"] + noise[0]),
@@ -300,7 +397,15 @@ def create_organic_layer(
 
     frame = geopandas.GeoDataFrame(records, geometry="geometry", crs=CRS)
 
-    for field in ("segment_id", "grid_level", "row_number", "column_number", "color_r", "color_g", "color_b"):
+    for field in (
+        "segment_id",
+        "grid_level",
+        "row_number",
+        "column_number",
+        "color_r",
+        "color_g",
+        "color_b",
+    ):
         frame[field] = frame[field].astype("int32")
 
     for field in ATTRIBUTE_FIELDS:
@@ -309,12 +414,12 @@ def create_organic_layer(
     return frame
 
 
-def create_grid(
+def _create_grid(
     rows: int,
     columns: int,
     level: int,
 ) -> geopandas.GeoDataFrame:
-    """Create one synthetic rectangular polygon grid (fallback)."""
+    '''Create one synthetic rectangular polygon grid (fallback).'''
     minimum_x, minimum_y, maximum_x, maximum_y = EXTENT
     cell_width = (maximum_x - minimum_x) / columns
     cell_height = (maximum_y - minimum_y) / rows
@@ -372,83 +477,21 @@ def create_grid(
         crs=CRS,
     )
 
-    for field in ("segment_id", "grid_level", "row_number", "column_number", "color_r", "color_g", "color_b"):
+    for field in (
+        "segment_id",
+        "grid_level",
+        "row_number",
+        "column_number",
+        "color_r",
+        "color_g",
+        "color_b",
+    ):
         frame[field] = frame[field].astype("int32")
 
     for field in ATTRIBUTE_FIELDS:
         frame[field] = frame[field].astype("float64")
 
     return frame
-
-
-def generate_dummy_dataset(
-    source_dataset: pathlib.Path,
-    layer_prefix: str,
-    pattern: str = "organic",
-    overwrite: bool = False,
-) -> None:
-    """Generate the four synthetic source polygon layers."""
-    layer_options = validate_environment()
-    source_dataset = source_dataset.resolve()
-
-    if source_dataset.exists():
-        if not overwrite:
-            raise FileExistsError(
-                f"Source dataset already exists: {source_dataset}. "
-                "Use --overwrite to replace it."
-            )
-        remove_dataset(source_dataset)
-
-    source_dataset.parent.mkdir(parents=True, exist_ok=True)
-
-    for level in range(1, 5):
-        layer_name = f"{layer_prefix}_{level}"
-        if pattern == "organic":
-            n_pts = LAYER_ORGANIC_COUNTS[level - 1]
-            frame = create_organic_layer(n_points=n_pts, level=level)
-        else:
-            rows, cols = LAYER_GRID_SHAPES[level - 1]
-            frame = create_grid(rows=rows, columns=cols, level=level)
-
-        LOGGER.info(
-            "Writing %s with %d polygons (%s pattern).",
-            layer_name,
-            len(frame),
-            pattern,
-        )
-
-        pyogrio.write_dataframe(
-            frame,
-            source_dataset,
-            layer=layer_name,
-            driver="OpenFileGDB",
-            append=source_dataset.exists(),
-            promote_to_multi=True,
-            layer_options=layer_options,
-        )
-
-    LOGGER.info(
-        "Synthetic source dataset written to %s.",
-        source_dataset,
-    )
-
-
-def main(argv: typing.Sequence[str] | None = None) -> None:
-    """Generate the dummy source dataset."""
-    args = parse_args(argv)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    generate_dummy_dataset(
-        source_dataset=args.source_dataset,
-        layer_prefix=args.layer_prefix,
-        pattern=args.pattern,
-        overwrite=args.overwrite,
-    )
 
 
 if __name__ == "__main__":

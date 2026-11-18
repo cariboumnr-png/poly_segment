@@ -19,28 +19,27 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Top-level namespace for the polygon merging module.
+'''
+Top-level namespace for the polygon merging module.
 
-Exposes configuration, rule definitions, and workflow execution runners via lazy
-resolution.
+Exposes configuration, rule definitions, and workflow execution runners
+via lazy resolution.
 
 Public APIs:
-    - MergeConfig: configuration dataclass for polygon layer merging.
-    - MergeRule: abstract protocol for merge rules.
-    - MetricDifferenceRule: rule comparing absolute attribute differences.
-    - RuleSet: composite rule container (all/any).
-    - DefaultMergeRuleSet: default rule comparing zq95, vci_1m, and LMoments 1-4.
-    - merge_intersected_polygons: spatial operation to merge intersected polygons.
-    - run_merge: execute the complete merge workflow.
-    - run_workflow: alias for run_merge.
-"""
-
-from __future__ import annotations
+    - `MergeConfig`: Configuration dataclass for polygon layer merging.
+    - `MergeRule`: Base contract for candidate neighbour merge rules.
+    - `MetricDifferenceRule`: Rule comparing metric differences.
+    - `RuleSet`: Composite rule container evaluating rules.
+    - `DefaultMergeRuleSet`: Default rule comparing standard metrics.
+    - `merge_intersected_polygons`: Spatial operation to merge polygons.
+    - `run_merge`: Execute the complete polygon merge workflow.
+    - `run_workflow`: Workflow runner alias for `run_merge`.
+'''
 
 # standard imports
+from __future__ import annotations
 import importlib
 import typing
-
 
 __all__ = [
     # classes & configs
@@ -73,7 +72,12 @@ def __getattr__(name: str) -> typing.Any:
         module = importlib.import_module(".configs", __package__)
         return getattr(module, name)
 
-    if name in {"MergeRule", "MetricDifferenceRule", "RuleSet", "DefaultMergeRuleSet"}:
+    if name in {
+        "MergeRule",
+        "MetricDifferenceRule",
+        "RuleSet",
+        "DefaultMergeRuleSet",
+    }:
         module = importlib.import_module(".rules", __package__)
         return getattr(module, name)
 
@@ -86,3 +90,4 @@ def __getattr__(name: str) -> typing.Any:
         return getattr(module, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

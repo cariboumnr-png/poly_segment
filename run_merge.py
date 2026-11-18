@@ -19,33 +19,32 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Run the Stage 2 polygon-merging workflow from a JSON configuration file.
+'''
+Run the Stage 2 polygon-merging workflow from a JSON configuration file.
 
-Relative paths in the JSON document are resolved relative to the JSON file,
-making execution independent of the current working directory.
+Relative paths in the JSON document are resolved relative to the
+JSON file, making execution independent of current working directory.
 
-Run from the project root:
-
-    python run_merge.py
-
-Use another configuration file:
-
-    python run_merge.py path/to/merge_config.json
-"""
-
-from __future__ import annotations
+Public APIs:
+    - `DEFAULT_CONFIG_PATH`: Default configuration file path.
+    - `REQUIRED_FIELDS`: Set of required JSON configuration keys.
+    - `OPTIONAL_FIELDS`: Set of optional JSON configuration keys.
+    - `SUPPORTED_FIELDS`: Set of all supported configuration keys.
+    - `parse_args`: Parse command-line arguments.
+    - `load_config`: Load, validate, and convert JSON configuration.
+    - `main`: Entry point for script execution.
+'''
 
 # standard imports
+from __future__ import annotations
 import argparse
 import json
 import logging
 import pathlib
 import typing
-
 # local imports
 from merge import MergeConfig
 from merge import run_merge
-
 
 LOGGER = logging.getLogger("poly_segment_merge")
 
@@ -76,10 +75,21 @@ OPTIONAL_FIELDS = {
 SUPPORTED_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
 
 
+# ----- public functions
 def parse_args(
     argv: typing.Sequence[str] | None = None,
 ) -> argparse.Namespace:
-    """Parse command-line arguments."""
+    '''
+    Parse command-line arguments.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+
+    Returns:
+        argparse.Namespace:
+            Parsed command-line arguments.
+    '''
     parser = argparse.ArgumentParser(
         description="Run Stage 2: polygon-merging workflow from JSON."
     )
@@ -94,7 +104,25 @@ def parse_args(
 
 
 def load_config(config_path: pathlib.Path) -> MergeConfig:
-    """Load, validate, and convert a JSON merge workflow configuration."""
+    '''
+    Load, validate, and convert a JSON merge workflow configuration.
+
+    Args:
+        config_path:
+            Path to the JSON configuration file on disk.
+
+    Returns:
+        MergeConfig:
+            Validated merge configuration dataclass instance.
+
+    Raises:
+        FileNotFoundError:
+            If configuration file does not exist.
+        ValueError:
+            If JSON syntax is invalid or fields are missing/unsupported.
+        TypeError:
+            If JSON root is not an object or field types are invalid.
+    '''
     config_path = config_path.resolve()
 
     if not config_path.is_file():
@@ -156,7 +184,9 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
 
     source_layer_prefix = raw_config.get("source_layer_prefix")
     if source_layer_prefix is not None:
-        source_layer_prefix = _require_string(source_layer_prefix, "source_layer_prefix")
+        source_layer_prefix = _require_string(
+            source_layer_prefix, "source_layer_prefix"
+        )
 
     layer_version = raw_config.get(
         "layer_version",
@@ -169,7 +199,9 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
 
     output_layer_name = raw_config.get("output_layer_name")
     if output_layer_name is not None:
-        output_layer_name = _require_string(output_layer_name, "output_layer_name")
+        output_layer_name = _require_string(
+            output_layer_name, "output_layer_name"
+        )
 
     threshold = float(raw_config.get("threshold", 0.10))
     min_shared_length = float(raw_config.get("min_shared_length", 0.0))
@@ -205,68 +237,14 @@ def load_config(config_path: pathlib.Path) -> MergeConfig:
     return config
 
 
-def _resolve_path(
-    value: object,
-    base_directory: pathlib.Path,
-    field_name: str,
-) -> pathlib.Path:
-    """Resolve a configured path relative to the JSON file."""
-    path_value = pathlib.Path(_require_string(value, field_name))
-
-    if not path_value.is_absolute():
-        path_value = base_directory / path_value
-
-    return path_value.resolve()
-
-
-def _require_string(value: object, field_name: str) -> str:
-    """Return a non-empty configuration string."""
-    if not isinstance(value, str) or not value.strip():
-        raise TypeError(
-            f"Configuration field {field_name!r} must be a non-empty string."
-        )
-    return value
-
-
-def _require_int(value: object, field_name: str) -> int:
-    """Return a configuration integer, rejecting booleans."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(
-            f"Configuration field {field_name!r} must be an integer."
-        )
-    return value
-
-
-def _require_bool(value: object, field_name: str) -> bool:
-    """Return a configuration Boolean."""
-    if not isinstance(value, bool):
-        raise TypeError(
-            f"Configuration field {field_name!r} must be a Boolean."
-        )
-    return value
-
-
-def _validate_config(config: MergeConfig) -> None:
-    """Validate constraints not enforced by the dataclass."""
-    if config.object_level_merge not in {1, 2, 3, 4}:
-        raise ValueError(
-            "Configuration field 'object_level_merge' must be one of 1, 2, 3, or 4."
-        )
-
-    if config.output_format not in {"filegdb", "geopackage"}:
-        raise ValueError(
-            "Configuration field 'output_format' must be 'filegdb' or 'geopackage'."
-        )
-
-    if config.mu < 0:
-        raise ValueError("Configuration field 'mu' must be non-negative.")
-
-    if config.threshold < 0:
-        raise ValueError("Configuration field 'threshold' must be non-negative.")
-
-
 def main(argv: typing.Sequence[str] | None = None) -> None:
-    """Load the JSON configuration and execute the polygon merging workflow."""
+    '''
+    Load JSON configuration and execute polygon merging workflow.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+    '''
     args = parse_args(argv)
     config = load_config(args.config)
 
@@ -279,13 +257,84 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
     LOGGER.info("Merge configuration loaded from %s.", args.config.resolve())
     LOGGER.info("Source dataset: %s.", config.source_dataset)
     if config.source_intersection_layer:
-        LOGGER.info("Pre-intersected layer to merge: %s.", config.source_intersection_layer)
+        LOGGER.info(
+            "Pre-intersected layer to merge: %s.",
+            config.source_intersection_layer,
+        )
     else:
-        LOGGER.info("Selected source layer prefix: %s.", config.source_layer_prefix)
+        LOGGER.info(
+            "Selected source layer prefix: %s.",
+            config.source_layer_prefix,
+        )
     LOGGER.info("Destination dataset: %s.", config.destination_dataset)
     LOGGER.info("Threshold: %.4f.", config.threshold)
 
     run_merge(config)
+
+
+# ----- private helpers
+def _resolve_path(
+    value: object,
+    base_directory: pathlib.Path,
+    field_name: str,
+) -> pathlib.Path:
+    '''Resolve a configured path relative to the JSON file.'''
+    path_value = pathlib.Path(_require_string(value, field_name))
+
+    if not path_value.is_absolute():
+        path_value = base_directory / path_value
+
+    return path_value.resolve()
+
+
+def _require_string(value: object, field_name: str) -> str:
+    '''Return a non-empty configuration string.'''
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError(
+            f"Configuration field {field_name!r} must be a non-empty string."
+        )
+    return value
+
+
+def _require_int(value: object, field_name: str) -> int:
+    '''Return a configuration integer, rejecting booleans.'''
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"Configuration field {field_name!r} must be an integer."
+        )
+    return value
+
+
+def _require_bool(value: object, field_name: str) -> bool:
+    '''Return a configuration Boolean.'''
+    if not isinstance(value, bool):
+        raise TypeError(
+            f"Configuration field {field_name!r} must be a Boolean."
+        )
+    return value
+
+
+def _validate_config(config: MergeConfig) -> None:
+    '''Validate constraints not enforced by the dataclass.'''
+    if config.object_level_merge not in {1, 2, 3, 4}:
+        raise ValueError(
+            "Configuration field 'object_level_merge' must be one of "
+            "1, 2, 3, or 4."
+        )
+
+    if config.output_format not in {"filegdb", "geopackage"}:
+        raise ValueError(
+            "Configuration field 'output_format' must be "
+            "'filegdb' or 'geopackage'."
+        )
+
+    if config.mu < 0:
+        raise ValueError("Configuration field 'mu' must be non-negative.")
+
+    if config.threshold < 0:
+        raise ValueError(
+            "Configuration field 'threshold' must be non-negative."
+        )
 
 
 if __name__ == "__main__":

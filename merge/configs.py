@@ -19,26 +19,31 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Configuration for polygon layer merging with injectable rule sets."""
+'''
+Configuration for polygon layer merging with injectable rule sets.
 
-from __future__ import annotations
+Defines the merge workflow configuration dataclass, supported output
+formats, and argument parser.
+
+Public APIs:
+    - `OUTPUT_FORMATS`: Mapping of output format names to drivers.
+    - `MergeConfig`: Configuration dataclass for polygon layer merging.
+    - `parse_args`: Parse command-line arguments into `MergeConfig`.
+'''
 
 # standard imports
+from __future__ import annotations
 import argparse
 import dataclasses
 import logging
 import pathlib
 import typing
-
 # third-party imports
 import pyogrio
-
 # local imports
 from .rules import DEFAULT_MERGE_METRICS
 from .rules import MergeRule
 
-
-# ----- constants
 OUTPUT_FORMATS: dict[str, tuple[str, str]] = {
     "filegdb": (".gdb", "OpenFileGDB"),
     "geopackage": (".gpkg", "GPKG"),
@@ -48,8 +53,7 @@ OUTPUT_FORMATS: dict[str, tuple[str, str]] = {
 # ----- public dataclasses
 @dataclasses.dataclass(frozen=True, slots=True)
 class MergeConfig:
-    """Configuration for Stage 2 polygon merging workflow run."""
-
+    '''Configuration for Stage 2 polygon merging workflow run.'''
     mu: int
     source_folder: pathlib.Path
     source_gdb_name: str
@@ -69,7 +73,7 @@ class MergeConfig:
 
     @property
     def source_dataset(self) -> pathlib.Path:
-        """Return the source dataset path."""
+        '''Return the source dataset path.'''
         raw = self.source_gdb_name
         for ext in (".gdb", ".gpkg"):
             if raw.endswith(ext):
@@ -82,24 +86,28 @@ class MergeConfig:
             if p.exists():
                 return p
             p_versioned = (
-                self.source_folder / f"isi_mu{self.mu}_postOBC_process_ver{raw}{ext}"
+                self.source_folder
+                / f"isi_mu{self.mu}_postOBC_process_ver{raw}{ext}"
             )
             if p_versioned.exists():
                 return p_versioned
 
-        dest_ext, _ = OUTPUT_FORMATS.get(self.output_format, (".gdb", "OpenFileGDB"))
+        dest_ext, _ = OUTPUT_FORMATS.get(
+            self.output_format, (".gdb", "OpenFileGDB")
+        )
         return self.source_folder / f"{raw}{dest_ext}"
 
     @property
     def source_intersection_layer(self) -> str | None:
-        """Return the pre-intersected layer name to merge, if available."""
+        '''Return pre-intersected layer name to merge, if available.'''
         if self.source_layer is not None:
             return self.source_layer
 
         if self.source_dataset.exists():
             try:
                 available = {
-                    str(name) for name, _ in pyogrio.list_layers(self.source_dataset)
+                    str(name)
+                    for name, _ in pyogrio.list_layers(self.source_dataset)
                 }
                 candidates = (
                     f"intersected_{self.layer_version}",
@@ -108,7 +116,10 @@ class MergeConfig:
                 for candidate in candidates:
                     if candidate in available:
                         return candidate
-                matching = [name for name in available if name.startswith("intersected_")]
+                matching = [
+                    name for name in available
+                    if name.startswith("intersected_")
+                ]
                 if len(matching) == 1:
                     return matching[0]
             except Exception:
@@ -117,7 +128,7 @@ class MergeConfig:
 
     @property
     def source_layers(self) -> tuple[str, ...]:
-        """Return the four source segmentation layer names if prefix is provided."""
+        '''Return four source layers if prefix is provided.'''
         if self.source_layer_prefix is None:
             return ()
         return tuple(
@@ -127,7 +138,7 @@ class MergeConfig:
 
     @property
     def selected_source_layer(self) -> str | None:
-        """Return the layer supplying attributes for comparison in 4-layer mode."""
+        '''Return layer supplying attributes in fallback mode.'''
         layers = self.source_layers
         if layers and 1 <= self.object_level_merge <= len(layers):
             return layers[self.object_level_merge - 1]
@@ -135,23 +146,24 @@ class MergeConfig:
 
     @property
     def effective_destination_folder(self) -> pathlib.Path:
-        """Return the destination folder, defaulting to source_folder."""
+        '''Return destination folder, defaulting to source_folder.'''
         return self.destination_folder or self.source_folder
 
     @property
     def destination_stem(self) -> str:
-        """Return the versioned destination dataset name without extension."""
+        '''Return destination dataset name without extension.'''
         return f"isi_mu{self.mu}_postOBC_process_ver{self.gdb_version}"
 
     @property
     def destination_dataset(self) -> pathlib.Path:
-        """Return the destination dataset path."""
+        '''Return the destination dataset path.'''
         extension, _ = OUTPUT_FORMATS[self.output_format]
-        return self.effective_destination_folder / f"{self.destination_stem}{extension}"
+        dest_folder = self.effective_destination_folder
+        return dest_folder / f"{self.destination_stem}{extension}"
 
     @property
     def merged_layer(self) -> str:
-        """Return the output merged polygon layer name."""
+        '''Return the output merged polygon layer name.'''
         if self.output_layer_name is not None:
             return self.output_layer_name
         return f"merged_polygons_{self.layer_version}"
@@ -159,7 +171,17 @@ class MergeConfig:
 
 # ----- public functions
 def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
-    """Parse command-line arguments and return MergeConfig."""
+    '''
+    Parse command-line arguments and return MergeConfig.
+
+    Args:
+        argv:
+            Optional sequence of command-line argument strings.
+
+    Returns:
+        MergeConfig:
+            Resolved merge workflow configuration instance.
+    '''
     parser = argparse.ArgumentParser(
         description=(
             "Stage 2: Merge intersected polygon layers according to an "
@@ -181,12 +203,15 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
     parser.add_argument(
         "--source-layer",
         default=None,
-        help="Name of the pre-intersected layer from Stage 1 (e.g. intersected_dummy_001).",
+        help=(
+            "Name of pre-intersected layer from Stage 1 "
+            "(e.g. intersected_dummy_001)."
+        ),
     )
     parser.add_argument(
         "--source-layer-prefix",
         default=None,
-        help="Prefix for raw 4-layer fallback intersection (if not pre-intersected).",
+        help="Prefix for raw 4-layer fallback intersection.",
     )
     parser.add_argument(
         "--object-level-merge",
@@ -229,7 +254,7 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         "--min-shared-length",
         type=float,
         default=0.0,
-        help="Minimum shared boundary length (metres) to qualify as candidate neighbour.",
+        help="Minimum shared boundary length (metres) to qualify.",
     )
     parser.add_argument(
         "--verbose",
@@ -261,3 +286,4 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> MergeConfig:
         output_layer_name=args.output_layer_name,
         min_shared_length=args.min_shared_length,
     )
+

@@ -19,7 +19,16 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Execute the polygon-neighbour analysis workflow and write outputs to disk."""
+'''
+Execution runner for polygon-neighbour analysis workflow.
+
+Orchestrates multi-layer geometric intersection, attribute enrichment,
+and atomic dataset publishing to File Geodatabase or GeoPackage.
+
+Public APIs:
+    - `run_workflow`: Execute the complete polygon-neighbour analysis
+      workflow.
+'''
 
 # pylint: disable=R0402
 
@@ -38,14 +47,24 @@ import intersect.configs as configs
 import intersect.attributes as attributes
 import intersect.spatial as spatial
 
-
-# ----- constants
 LOGGER = logging.getLogger("post_obc_neighbour_analysis")
 
 
 # ----- public functions
 def run_workflow(config: configs.WorkflowConfig) -> None:
-    """Execute the complete polygon-neighbour analysis workflow."""
+    '''
+    Execute the complete polygon-neighbour analysis workflow.
+
+    Args:
+        config:
+            Workflow configuration containing source and destination
+            parameters.
+
+    Raises:
+        FileExistsError:
+            If destination lacks required output layers and overwrite
+            is False.
+    '''
     _validate_environment(config.output_format)
     spatial.validate_source_dataset(config.source_dataset, config.source_layers)
 
@@ -98,7 +117,7 @@ def run_workflow(config: configs.WorkflowConfig) -> None:
 
 # ----- private helpers
 def _validate_environment(output_format: str) -> None:
-    """Ensure the requested output driver is available and writable."""
+    '''Ensure the requested output driver is available and writable.'''
     _, driver = configs.OUTPUT_FORMATS[output_format]
     writable_drivers = pyogrio.list_drivers(write=True)
 
@@ -110,8 +129,9 @@ def _validate_environment(output_format: str) -> None:
 
     if output_format == "filegdb" and pyogrio.__gdal_version__ < (3, 6, 0):
         raise RuntimeError(
-            "File Geodatabase writing through OpenFileGDB requires GDAL >= 3.6; "
-            f"the installed version is {pyogrio.__gdal_version_string__}. "
+            "File Geodatabase writing through OpenFileGDB requires "
+            f"GDAL >= 3.6; the installed version is "
+            f"{pyogrio.__gdal_version_string__}. "
             "Use --output-format geopackage or upgrade GDAL/Pyogrio."
         )
 
@@ -124,7 +144,7 @@ def _validate_environment(output_format: str) -> None:
 
 
 def _remove_dataset(path: pathlib.Path) -> None:
-    """Remove a temporary or backup dataset and common SQLite sidecars."""
+    '''Remove temporary or backup dataset and SQLite sidecars.'''
     if path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
@@ -140,7 +160,7 @@ def _destination_is_complete(
     destination: pathlib.Path,
     required_layers: typing.Sequence[str],
 ) -> bool:
-    """Return True when an existing destination contains both output layers."""
+    '''Return True if destination contains both output layers.'''
     existing_layers = {
         str(layer_name)
         for layer_name, _ in pyogrio.list_layers(destination)
@@ -157,7 +177,7 @@ def _write_outputs(
     neighbour_table: str,
     overwrite: bool,
 ) -> None:
-    """Write both outputs to a temporary dataset and publish on success."""
+    '''Write outputs to temporary dataset and publish on success.'''
     _, driver = configs.OUTPUT_FORMATS[output_format]
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -221,3 +241,4 @@ def _write_outputs(
             _remove_dataset(temporary_path)
 
     LOGGER.info("Outputs written to %s", destination)
+

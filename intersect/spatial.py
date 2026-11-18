@@ -19,7 +19,17 @@
 #                       and limitations under the License.                    #
 # =========================================================================== #
 
-"""Polygon validation, intersection, and neighbour construction."""
+'''
+Polygon validation, geometric intersection, and neighbour construction.
+
+Provides multi-layer geometric overlay operations, CRS verification, and
+spatial index querying to identify touching polygon boundaries.
+
+Public APIs:
+    - `validate_source_dataset`: Validate source dataset existence.
+    - `intersect_polygon_layers`: Intersect four polygon layers.
+    - `build_polygon_neighbours`: Construct neighbour table.
+'''
 
 # standard imports
 import logging
@@ -33,8 +43,6 @@ import pyproj
 import shapely
 import shapely.geometry.base as shapely_base
 
-
-# ----- constants
 LOGGER = logging.getLogger("post_obc_neighbour_analysis")
 
 
@@ -43,7 +51,21 @@ def validate_source_dataset(
     source_dataset: pathlib.Path,
     required_layers: typing.Sequence[str],
 ) -> None:
-    """Check that the source dataset and all required layers are present."""
+    '''
+    Check that the source dataset and all required layers are present.
+
+    Args:
+        source_dataset:
+            Path to the source geospatial dataset.
+        required_layers:
+            Sequence of layer names that must exist in dataset.
+
+    Raises:
+        FileNotFoundError:
+            If the source dataset path does not exist.
+        ValueError:
+            If one or more required layers are missing.
+    '''
     if not source_dataset.exists():
         raise FileNotFoundError(
             f"Source geodatabase does not exist: {source_dataset}"
@@ -65,9 +87,27 @@ def intersect_polygon_layers(
     source_dataset: pathlib.Path,
     layer_names: typing.Sequence[str],
 ) -> geopandas.GeoDataFrame:
-    """Intersect four polygon layers, retaining each layer's source feature ID."""
+    '''
+    Intersect four polygon layers, retaining source feature IDs.
+
+    Args:
+        source_dataset:
+            Path to the source geospatial dataset.
+        layer_names:
+            Sequence of four polygon layer names to intersect.
+
+    Returns:
+        geopandas.GeoDataFrame:
+            Intersected polygons retaining source FID references.
+
+    Raises:
+        ValueError:
+            If count is not 4, CRSs differ, or intersection is empty.
+    '''
     if len(layer_names) != 4:
-        raise ValueError("Exactly four polygon segmentation layers are required.")
+        raise ValueError(
+            "Exactly four polygon segmentation layers are required."
+        )
 
     LOGGER.info("Reading the four source polygon layers.")
     input_layers = [
@@ -100,7 +140,8 @@ def intersect_polygon_layers(
         if intersection.empty:
             raise ValueError(
                 "The four source layers have no common polygon area; "
-                f"the intersection became empty after processing {layer_name!r}."
+                f"the intersection became empty after processing "
+                f"{layer_name!r}."
             )
 
     LOGGER.info("Intersection produced %d polygons.", len(intersection))
@@ -110,12 +151,25 @@ def intersect_polygon_layers(
 def build_polygon_neighbours(
     intersection: geopandas.GeoDataFrame,
 ) -> pandas.DataFrame:
-    """Build bidirectional edge- and point-neighbour relationships.
+    '''
+    Build bidirectional edge- and point-neighbour relationships.
 
-    ``LENGTH`` is the total shared-boundary length in metres. ``NODE_COUNT``
-    counts zero-dimensional point contacts; shared line segments contribute to
-    ``LENGTH`` rather than to ``NODE_COUNT``.
-    """
+    `LENGTH` is total shared-boundary length in metres. `NODE_COUNT`
+    counts zero-dimensional contacts; shared lines contribute to
+    `LENGTH` rather than `NODE_COUNT`.
+
+    Args:
+        intersection:
+            GeoDataFrame of intersected polygons with four FID fields.
+
+    Returns:
+        pandas.DataFrame:
+            Table of directed neighbour pairs, length, and nodes.
+
+    Raises:
+        ValueError:
+            If the intersection GeoDataFrame lacks four FID fields.
+    '''
     id_fields = [
         column for column in intersection.columns if column.startswith("FID_")
     ]
@@ -154,8 +208,9 @@ def build_polygon_neighbours(
 
     records: list[dict[str, object]] = []
     for left_index, right_index in candidate_pairs.T:
-        # STRtree returns directed pairs. Keep one orientation here, then add
-        # both directions explicitly to match ArcGIS BOTH_SIDES behavior.
+        # `STRtree` returns directed pairs. Keep one orientation here,
+        # then add both directions to match ArcGIS `BOTH_SIDES`
+        # behavior.
         if left_index >= right_index:
             continue
 
@@ -210,7 +265,7 @@ def _read_intersection_input(
     layer_name: str,
     level: int,
 ) -> geopandas.GeoDataFrame:
-    """Read one polygon layer and qualify its attributes by segmentation level."""
+    '''Read one polygon layer and qualify level attributes.'''
     frame = pyogrio.read_dataframe(
         source_dataset,
         layer=layer_name,
@@ -221,8 +276,8 @@ def _read_intersection_input(
     id_field = f"FID_{layer_name}"
     frame[id_field] = frame.index.to_numpy()
 
-    # Keep all source attributes, as ArcPy Intersect(join_attributes="ALL")
-    # did, but prefix them to avoid ambiguous names across segmentation levels.
+    # keep source attributes, prefixing to avoid ambiguous names
+    # across segmentation levels.
     geometry_name = frame.geometry.name
     field_renames = {
         field: f"L{level}_{field}"
@@ -237,7 +292,7 @@ def _validate_polygon_geometries(
     frame: geopandas.GeoDataFrame,
     layer_name: str,
 ) -> None:
-    """Validate polygon geometry and feature identifiers for one input layer."""
+    '''Validate polygon geometry and feature IDs for one input layer.'''
     if frame.crs is None:
         raise ValueError(
             f"Layer {layer_name!r} has no coordinate reference system."
@@ -270,7 +325,7 @@ def _validate_polygon_geometries(
 
 
 def _count_point_components(geometry: shapely_base.BaseGeometry) -> int:
-    """Count zero-dimensional components in a shared-boundary geometry."""
+    '''Count point components in a shared-boundary geometry.'''
     if geometry.is_empty:
         return 0
 
@@ -285,7 +340,7 @@ def _count_point_components(geometry: shapely_base.BaseGeometry) -> int:
 
 
 def _metres_per_crs_unit(crs_input: object) -> float:
-    """Return the linear-unit conversion factor for a projected CRS."""
+    '''Return the linear-unit conversion factor for a projected CRS.'''
     crs = pyproj.CRS.from_user_input(crs_input)
     if not crs.is_projected:
         raise ValueError(
@@ -301,3 +356,4 @@ def _metres_per_crs_unit(crs_input: object) -> float:
         raise ValueError(f"Invalid linear units for CRS {crs}.")
 
     return float(conversion_factor)
+
