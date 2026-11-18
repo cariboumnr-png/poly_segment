@@ -24,11 +24,11 @@ Visual comparison graphics and interactive HTML for workflow stages.
 
 Produces multi-panel comparison plots and interactive SVG/HTML viewers
 to inspect raw segmentation levels, Stage 1 intersections, and Stage 2
-merged polygon stands.
+merged polygon stands (supporting both single runs and merge sweeps).
 
 Public APIs:
     - `LANDCOVER_COLORS`: Mapping of vegetation classes to hex colors.
-    - `plot_comparison_figure`: Render 2x3 panel comparison graphic.
+    - `plot_comparison_figure`: Render multi-panel comparison graphic.
     - `generate_interactive_html`: Render self-contained HTML viewer.
     - `parse_args`: Parse command-line arguments.
     - `main`: Entry point for script execution.
@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import pathlib
 import tempfile
@@ -132,11 +133,18 @@ def parse_args(
 def plot_comparison_figure(
     raw_layers: dict[int, geopandas.GeoDataFrame],
     intersected_gdf: geopandas.GeoDataFrame,
-    merged_gdf: geopandas.GeoDataFrame,
+    merged_gdf: (
+        geopandas.GeoDataFrame
+        | dict[str, tuple[geopandas.GeoDataFrame, str]]
+        | list[tuple[str, geopandas.GeoDataFrame, str]]
+    ),
     output_png: pathlib.Path,
 ) -> None:
     '''
-    Render a 2x3 panel comparison graphic showing workflow progression.
+    Render a comparison graphic showing workflow progression.
+
+    Supports both single Stage 2 merged layers (2x3 panel) and multi-trial
+    parameter sweeps (with dynamic rows and metrics legend annotations).
 
     Args:
         raw_layers:
@@ -144,7 +152,7 @@ def plot_comparison_figure(
         intersected_gdf:
             Stage 1 intersected polygons GeoDataFrame.
         merged_gdf:
-            Stage 2 merged polygons GeoDataFrame.
+            Stage 2 merged polygons GeoDataFrame or list/dict of trials.
         output_png:
             Target image file path on disk.
     '''
@@ -154,64 +162,100 @@ def plot_comparison_figure(
     import matplotlib.pyplot
     # pylint: enable=import-outside-toplevel
 
-    fig, axes = matplotlib.pyplot.subplots(2, 3, figsize=(18, 11), dpi=200)
-    matplotlib.pyplot.subplots_adjust(
-        wspace=0.15, hspace=0.25, top=0.92, bottom=0.08
-    )
+    merge_items = _normalize_merge_inputs(merged_gdf)
+    total_panels = 5 + len(merge_items)
+    ncols = 3
+    nrows = math.ceil(total_panels / ncols)
 
+    fig, axes = matplotlib.pyplot.subplots(
+        nrows, ncols, figsize=(18, 5.5 * nrows), dpi=200
+    )
+    axes_flat = list(axes.flat) if hasattr(axes, "flat") else [axes]
+
+    suptitle_text = (
+        "Multi-Scale Segmentation, Intersection & Rule-Based Merge Sweep"
+        if len(merge_items) > 1
+        else (
+            "Multi-Scale Polygon Segmentation, Intersection & "
+            "Rule-Based Merging"
+        )
+    )
     fig.suptitle(
-        "Multi-Scale Polygon Segmentation, Intersection & Rule-Based Merging",
+        suptitle_text,
         fontsize=16,
         fontweight="bold",
-        y=0.97,
+        y=0.98 if nrows > 2 else 0.97,
     )
 
-    panels = [
+    panels: list[
+        tuple[
+            typing.Any,
+            geopandas.GeoDataFrame,
+            str,
+            int,
+            bool,
+            str | None,
+        ]
+    ] = [
         (
-            axes[0, 0],
+            axes_flat[0],
             raw_layers[1],
             f"Level 1: Coarse Segments ({len(raw_layers[1])} polygons)",
             1,
             False,
+            None,
         ),
         (
-            axes[0, 1],
+            axes_flat[1],
             raw_layers[2],
             f"Level 2: Medium-Coarse ({len(raw_layers[2])} polygons)",
             2,
             False,
+            None,
         ),
         (
-            axes[0, 2],
+            axes_flat[2],
             raw_layers[3],
             f"Level 3: Object Merge Level ({len(raw_layers[3])} polygons)",
             3,
             False,
+            None,
         ),
         (
-            axes[1, 0],
+            axes_flat[3],
             raw_layers[4],
             f"Level 4: Fine Segments ({len(raw_layers[4])} polygons)",
             4,
             False,
+            None,
         ),
         (
-            axes[1, 1],
+            axes_flat[4],
             intersected_gdf,
             f"Stage 1: Intersected ({len(intersected_gdf)} sub-polygons)",
             3,
             True,
-        ),
-        (
-            axes[1, 2],
-            merged_gdf,
-            f"Stage 2: Merged Product ({len(merged_gdf)} dissolved stands)",
-            3,
-            False,
+            None,
         ),
     ]
 
-    for ax, gdf, title, lvl, show_dense_edges in panels:
+    for trial_idx, (trial_title, trial_gdf, trial_desc) in enumerate(
+        merge_items
+    ):
+        panel_ax = axes_flat[5 + trial_idx]
+        title_str = (
+            f"{trial_title} ({len(trial_gdf)} dissolved stands)"
+            if "merged" in trial_title.lower() or "trial" in trial_title.lower()
+            else f"Stage 2: {trial_title} ({len(trial_gdf)} dissolved stands)"
+        )
+        panels.append(
+            (panel_ax, trial_gdf, title_str, 3, False, trial_desc)
+        )
+
+    for i in range(total_panels, len(axes_flat)):
+        axes_flat[i].set_visible(False)
+
+    for idx, (ax, gdf, title, lvl, show_dense, desc) in enumerate(panels):
         ax.set_title(title, fontsize=12, fontweight="semibold", pad=8)
         ax.set_aspect("equal")
         ax.set_xticks([])
@@ -222,9 +266,9 @@ def plot_comparison_figure(
             for _, row in gdf.iterrows()
         ]
 
-        edge_color = "black" if not show_dense_edges else "#222222"
-        linewidth = 0.5 if not show_dense_edges else 0.8
-        alpha = 0.88 if not show_dense_edges else 0.75
+        edge_color = "black" if not show_dense else "#222222"
+        linewidth = 0.5 if not show_dense else 0.8
+        alpha = 0.88 if not show_dense else 0.75
 
         gdf.plot(
             ax=ax,
@@ -234,8 +278,26 @@ def plot_comparison_figure(
             alpha=alpha,
         )
 
-        # in merged panel, annotate stands with landcover and area
-        if ax == axes[1, 2]:
+        if desc:
+            ax.text(
+                0.5,
+                0.96,
+                desc,
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=8.5,
+                fontweight="bold",
+                color="#0f172a",
+                bbox=dict(
+                    boxstyle="round,pad=0.25",
+                    fc="#e2e8f0",
+                    ec="#64748b",
+                    alpha=0.92,
+                ),
+            )
+
+        if idx >= 5:
             for _, row in gdf.iterrows():
                 centroid = row.geometry.centroid
                 parts = row.get("num_merged_parts", 1)
@@ -247,11 +309,11 @@ def plot_comparison_figure(
                     xy=(centroid.x, centroid.y),
                     ha="center",
                     va="center",
-                    fontsize=8.5,
+                    fontsize=8.0 if len(merge_items) > 1 else 8.5,
                     fontweight="bold",
                     color="white",
                     bbox=dict(
-                        boxstyle="round,pad=0.3",
+                        boxstyle="round,pad=0.25",
                         fc="black",
                         ec="none",
                         alpha=0.65,
@@ -281,11 +343,18 @@ def plot_comparison_figure(
 def generate_interactive_html(
     raw_layers: dict[int, geopandas.GeoDataFrame],
     intersected_gdf: geopandas.GeoDataFrame,
-    merged_gdf: geopandas.GeoDataFrame,
+    merged_gdf: (
+        geopandas.GeoDataFrame
+        | dict[str, tuple[geopandas.GeoDataFrame, str]]
+        | list[tuple[str, geopandas.GeoDataFrame, str]]
+    ),
     output_html: pathlib.Path,
 ) -> None:
     '''
     Generate interactive SVG visualizer with toggles and tooltips.
+
+    Supports toggling across raw segmentation levels, Stage 1 intersections,
+    and all Stage 2 merged trial runs.
 
     Args:
         raw_layers:
@@ -293,10 +362,12 @@ def generate_interactive_html(
         intersected_gdf:
             Stage 1 intersected polygons GeoDataFrame.
         merged_gdf:
-            Stage 2 merged polygons GeoDataFrame.
+            Stage 2 merged polygons GeoDataFrame or list/dict of trials.
         output_html:
             Target HTML file path on disk.
     '''
+    merge_items = _normalize_merge_inputs(merged_gdf)
+
     extent_minx = min(
         raw_layers[1].total_bounds[0],
         intersected_gdf.total_bounds[0],
@@ -332,26 +403,26 @@ def generate_interactive_html(
             pts = []
             for x, y in g.exterior.coords:
                 sx = (x - extent_minx) / width_m * svg_size
-                sy = (extent_maxy - y) / height_m * svg_size  # SVG flips Y
+                sy = (extent_maxy - y) / height_m * svg_size
                 pts.append(f"{sx:.1f},{sy:.1f}")
             paths.append(f'<polygon points="{" ".join(pts)}"')
         return paths
 
-    layers_data: dict[str, list[dict[str, object]]] = {
-        "Level 1 (Coarse)": [],
-        "Level 4 (Fine)": [],
-        "Stage 1: Intersected (Over-segmented)": [],
-        "Stage 2: Merged Product": [],
-    }
+    layers_data: dict[str, list[dict[str, object]]] = {}
 
-    dataset_pairs = [
-        ("Level 1 (Coarse)", raw_layers[1], 1),
-        ("Level 4 (Fine)", raw_layers[4], 4),
-        ("Stage 1: Intersected (Over-segmented)", intersected_gdf, 3),
-        ("Stage 2: Merged Product", merged_gdf, 3),
+    dataset_pairs: list[
+        tuple[str, geopandas.GeoDataFrame, int, str | None]
+    ] = [
+        ("Level 1 (Coarse)", raw_layers[1], 1, None),
+        ("Level 4 (Fine)", raw_layers[4], 4, None),
+        ("Stage 1: Intersected", intersected_gdf, 3, None),
     ]
 
-    for layer_name, gdf, lvl in dataset_pairs:
+    for title, gdf, desc in merge_items:
+        prefix = "Stage 2: " if not title.startswith("Stage 2") else ""
+        dataset_pairs.append((f"{prefix}{title}", gdf, 3, desc))
+
+    for layer_name, gdf, lvl, desc in dataset_pairs:
         items = []
         for _, row in gdf.iterrows():
             poly_tags = to_svg_poly(row.geometry)
@@ -377,6 +448,7 @@ def generate_interactive_html(
                     "vci": f"{vci:.3f}",
                     "parts": parts,
                     "area": f"{area_m2:.0f} m² ({area_m2 / 10000:.2f} ha)",
+                    "config": desc or "Default",
                 })
         layers_data[layer_name] = items
 
@@ -385,6 +457,8 @@ def generate_interactive_html(
         f'style="background:{col};"></div><span>{label}</span></div>'
         for label, col in LANDCOVER_COLORS.items()
     )
+
+    initial_layer = list(layers_data.keys())[-1]
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -404,10 +478,12 @@ def generate_interactive_html(
     background: #1e293b; border-radius: 12px; padding: 16px;
     border: 1px solid #334155; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   }}
-  .controls {{ display: flex; gap: 10px; margin-bottom: 12px; }}
+  .controls {{
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+  }}
   button.tab-btn {{
-    background: #334155; color: #cbd5e1; border: none; padding: 8px 14px;
-    border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+    background: #334155; color: #cbd5e1; border: none; padding: 7px 12px;
+    border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 500;
   }}
   button.tab-btn.active {{ background: #3b82f6; color: white; }}
   svg.map-svg {{
@@ -452,18 +528,25 @@ def generate_interactive_html(
 <body>
 <div style="max-width: 1200px; margin: 0 auto;">
   <h1>Interactive Polygon Segmentation & Merge Visualizer</h1>
-  <p class="subtitle">Hover over polygons to inspect attributes. Toggle between raw layers, Stage 1 intersections, and Stage 2 merged stands.</p>
+  <p class="subtitle">
+    Hover over polygons to inspect attributes. Toggle between raw
+    segmentation levels, Stage 1 intersections, and Stage 2 merge runs.
+  </p>
 </div>
 <div class="container">
   <div class="map-card">
     <div class="controls" id="btn-group"></div>
-    <svg class="map-svg" width="{svg_size}" height="{svg_size}" id="svg-map"></svg>
+    <svg class="map-svg" width="{svg_size}" height="{svg_size}"
+         id="svg-map"></svg>
   </div>
   <div class="info-panel">
     <div class="info-card">
       <h3 id="info-title">Hover over a polygon</h3>
       <div id="info-body">
-        <p style="color:#64748b; font-size:13px;">Move mouse over any polygon on the map to see height, density, landcover, and merge details.</p>
+        <p style="color:#64748b; font-size:13px;">
+          Move mouse over any polygon on the map to see height, density,
+          landcover, and merge trial details.
+        </p>
       </div>
     </div>
     <div class="legend">
@@ -479,7 +562,7 @@ const layerNames = Object.keys(layersData);
 const svgMap = document.getElementById("svg-map");
 const btnGroup = document.getElementById("btn-group");
 
-let currentLayer = "Stage 2: Merged Product";
+let currentLayer = {json.dumps(initial_layer)};
 
 function renderControls() {{
   btnGroup.innerHTML = "";
@@ -487,7 +570,11 @@ function renderControls() {{
     const btn = document.createElement("button");
     btn.className = "tab-btn" + (name === currentLayer ? " active" : "");
     btn.innerText = name;
-    btn.onclick = () => {{ currentLayer = name; renderControls(); renderMap(); }};
+    btn.onclick = () => {{
+      currentLayer = name;
+      renderControls();
+      renderMap();
+    }};
     btnGroup.appendChild(btn);
   }});
 }}
@@ -497,7 +584,8 @@ function renderMap() {{
   const items = layersData[currentLayer] || [];
   items.forEach((item, idx) => {{
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    g.innerHTML = item.svg_tag + ' fill="' + item.color + '" data-idx="' + idx + '"></polygon>';
+    g.innerHTML = item.svg_tag + ' fill="' + item.color + '" data-idx="' +
+      idx + '"></polygon>';
     const poly = g.firstChild;
     poly.onmouseenter = () => updateInfo(item);
     svgMap.appendChild(poly);
@@ -506,13 +594,25 @@ function renderMap() {{
 
 function updateInfo(item) {{
   document.getElementById("info-title").innerText = item.landcover;
-  document.getElementById("info-body").innerHTML = `
-    <div class="info-row"><span class="info-label">Canopy Height (ZQ95):</span><span class="info-value">${{item.zq95}}</span></div>
-    <div class="info-row"><span class="info-label">Vegetation Index (VCI):</span><span class="info-value">${{item.vci}}</span></div>
-    <div class="info-row"><span class="info-label">Merged Sub-Parts:</span><span class="info-value">${{item.parts}}</span></div>
-    <div class="info-row"><span class="info-label">Total Area:</span><span class="info-value">${{item.area}}</span></div>
-    <div class="info-row"><span class="info-label">Current Stage:</span><span class="info-value">${{currentLayer}}</span></div>
+  let html = `
+    <div class="info-row"><span class="info-label">Canopy (ZQ95):</span>
+      <span class="info-value">${{item.zq95}}</span></div>
+    <div class="info-row"><span class="info-label">Density (VCI):</span>
+      <span class="info-value">${{item.vci}}</span></div>
+    <div class="info-row"><span class="info-label">Merged Sub-Parts:</span>
+      <span class="info-value">${{item.parts}}</span></div>
+    <div class="info-row"><span class="info-label">Total Area:</span>
+      <span class="info-value">${{item.area}}</span></div>
+    <div class="info-row"><span class="info-label">Current Stage:</span>
+      <span class="info-value">${{currentLayer}}</span></div>
   `;
+  if (item.config && item.config !== "Default") {{
+    html += `
+      <div class="info-row"><span class="info-label">Trial Config:</span>
+        <span class="info-value" style="color:#60a5fa;">${{item.config}}</span>
+      </div>`;
+  }}
+  document.getElementById("info-body").innerHTML = html;
 }}
 
 renderControls();
@@ -544,11 +644,17 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
     )
 
     LOGGER.info("Loading raw layers from %s...", args.source_gdb)
+    avail_raw = {name for name, _ in pyogrio.list_layers(args.source_gdb)}
     raw_layers: dict[int, geopandas.GeoDataFrame] = {}
     for lvl in range(1, 5):
+        matched = [
+            n for n in avail_raw
+            if n.endswith(f"_{lvl}") or n == f"level_{lvl}"
+        ]
+        layer_to_read = matched[0] if matched else f"segmented_objects_R1_{lvl}"
         raw_layers[lvl] = pyogrio.read_dataframe(
             args.source_gdb,
-            layer=f"segmented_objects_R1_{lvl}",
+            layer=layer_to_read,
         )
 
     intersect_gdb = args.output_gdb or args.intersect_gdb
@@ -573,45 +679,89 @@ def main(argv: typing.Sequence[str] | None = None) -> None:
     if not intersect_candidates:
         raise ValueError(f"No intersected layer found in {intersect_gdb}")
 
-    LOGGER.info("Loading merged layer from %s...", merge_gdb)
+    LOGGER.info("Loading merged layers from %s...", merge_gdb)
     if not merge_gdb.exists():
         raise FileNotFoundError(f"Merge dataset not found: {merge_gdb}")
     avail_merge = {name for name, _ in pyogrio.list_layers(merge_gdb)}
-    merge_candidates = [
-        n for n in avail_merge if n.startswith("merged_polygons_")
-    ]
+    merge_candidates = sorted([
+        n for n in avail_merge if n.startswith("merged_")
+    ])
     if not merge_candidates:
         raise ValueError(f"No merged layer found in {merge_gdb}")
 
     intersected_gdf = pyogrio.read_dataframe(
         intersect_gdb, layer=intersect_candidates[0]
     )
-    merged_gdf = pyogrio.read_dataframe(
-        merge_gdb, layer=merge_candidates[0]
-    )
+
+    if len(merge_candidates) == 1:
+        merged_input: (
+            geopandas.GeoDataFrame
+            | list[tuple[str, geopandas.GeoDataFrame, str]]
+        ) = pyogrio.read_dataframe(merge_gdb, layer=merge_candidates[0])
+    else:
+        merged_trials: list[tuple[str, geopandas.GeoDataFrame, str]] = []
+        for cand in merge_candidates:
+            df = pyogrio.read_dataframe(merge_gdb, layer=cand)
+            title = cand.replace("merged_trial_", "").replace("merged_", "")
+            title = title.replace("_", " ").title()
+            merged_trials.append((title, df, f"Layer: {cand}"))
+        merged_input = merged_trials
 
     LOGGER.info(
-        "Loaded: %d intersection sub-polygons, %d merged polygons.",
+        "Loaded %d intersection sub-polygons and %d merge candidate(s).",
         len(intersected_gdf),
-        len(merged_gdf),
+        len(merge_candidates),
     )
 
     plot_comparison_figure(
         raw_layers=raw_layers,
         intersected_gdf=intersected_gdf,
-        merged_gdf=merged_gdf,
+        merged_gdf=merged_input,
         output_png=args.output_image,
     )
 
     generate_interactive_html(
         raw_layers=raw_layers,
         intersected_gdf=intersected_gdf,
-        merged_gdf=merged_gdf,
+        merged_gdf=merged_input,
         output_html=args.output_html,
     )
 
 
 # ----- private helpers
+def _normalize_merge_inputs(
+    merged_input: (
+        geopandas.GeoDataFrame
+        | dict[str, tuple[geopandas.GeoDataFrame, str]]
+        | list[tuple[str, geopandas.GeoDataFrame, str]]
+    ),
+) -> list[tuple[str, geopandas.GeoDataFrame, str | None]]:
+    '''Normalize varied merged inputs into standard title-gdf-desc tuples.'''
+    items: list[tuple[str, geopandas.GeoDataFrame, str | None]] = []
+    if isinstance(merged_input, geopandas.GeoDataFrame):
+        items.append(("Merged Product", merged_input, None))
+    elif isinstance(merged_input, dict):
+        for title, val in merged_input.items():
+            if isinstance(val, (tuple, list)) and len(val) >= 2:
+                items.append((str(title), val[0], str(val[1])))
+            else:
+                items.append((str(title), val, None))
+    elif isinstance(merged_input, (list, tuple)):
+        for entry in merged_input:
+            if isinstance(entry, (tuple, list)):
+                if len(entry) >= 3:
+                    items.append(
+                        (str(entry[0]), entry[1], str(entry[2]))
+                    )
+                elif len(entry) == 2:
+                    items.append((str(entry[0]), entry[1], None))
+                else:
+                    items.append(("Merged Stand", entry[0], None))
+            else:
+                items.append(("Merged Stand", entry, None))
+    return items
+
+
 def _resolve_layer_color(row: typing.Any, level: int | None = None) -> str:
     '''Extract hex color from row or map from landcover label.'''
     if level is not None and f"L{level}_hex_color" in row:

@@ -1,5 +1,129 @@
-/.venv/*
-/.uv_cache/*
+# ==============================================================================
+# OS FILES
+# ==============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux temp files
+*~
+
+# ==============================================================================
+# PYTHON FILES / ENVIRONMENTS
+# ==============================================================================
+
+# Bytecode / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+.uv_cache/
+venv/
+env/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Testing / coverage
+.coverage
+.coverage.*
+htmlcov/
+.cache/               # pytest, coverage, others
+pytest_cache/
+.pytest_cache/
+.mypy_cache/
+ruff_cache/
+*.pylintrc
+
+# Logs from tools / dev
+*.log
+logs/
+
+# ==============================================================================
+# IDE / EDITOR FILES
+# ==============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==============================================================================
+# PROJECT-SPECIFIC DIRECTORIES
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Artifacts produced by factories (grid, raster, domain, schema)
+# ------------------------------------------------------------------------------
+# Experiment I/O
+/experiment/*
+
+# Developer scratch workspace
+/dev/*
+*dev.yaml
 /sandbox/*
-*/__pycache__/*
-/.agents/
+
+# ==============================================================================
+# HYDRA OUTPUTS
+# ==============================================================================
+# Hydra automatically generates directories for each run
+# These should not be versioned
+multirun/
+outputs/
+hydra.log
+
+# ==============================================================================
+# MACHINE LEARNING / MODELING
+# ==============================================================================
+# Torch / numpy temp files
+*.pt
+*.pth
+*.pkl
+*.npz
+*.npy
+
+# Allow tracked domain knowledge embeddings
+!knowledge/embeddings/**
+
+# ==============================================================================
+# JUPYTER / MISC
+# ==============================================================================
+.ipynb_checkpoints/
+*.ipynb~
+
+# Environment variables
+.env
+.env.*
+
+# ==============================================================================
+# HYDRA OUTPUTS
+# ==============================================================================
+# Hydra automatically generates directories for each run
+# These should not be versioned
+multirun/
+outputs/
+hydra.log
+
+# Optuna / experiment databases
+*.db
+
+# ==============================================================================
+# AGENTS
+# ==============================================================================
+.agents/
+
+# ==============================================================================
+# END
+# ==============================================================================

@@ -45,7 +45,8 @@ project-root/
 │   ├── rules.py
 │   └── spatial.py
 ├── scripts/
-│   └── generate_dummy_data.py
+│   ├── generate_dummy_data.py
+│   └── visualize.py
 ├── tests/
 │   ├── conftest.py
 │   ├── test_rules.py
@@ -55,6 +56,7 @@ project-root/
 ├── merge_config.json          # Stage 2: Merging workflow configuration
 ├── run_intersect.py           # CLI runner for Stage 1 (intersect)
 ├── run_merge.py               # CLI runner for Stage 2 (merge)
+├── run_merge_sweep.py         # Multi-trial parameter sweep orchestrator
 └── README.md
 ```
 
@@ -394,3 +396,42 @@ config = MergeConfig(
 
 merged_gdf = run_merge(config)
 ```
+
+---
+
+# Merge Parameter Sweeps (`run_merge_sweep.py`)
+
+`run_merge_sweep.py` orchestrates multi-trial parameter sweeps across structural
+metrics and tolerance thresholds. It writes all trial outputs into a dedicated
+sweep geodatabase (`isi_mu{mu}_postOBC_merge_sweep_ver{version}.gdb`), writes
+summary statistics to `sweep_summary.json`, and renders extended multi-panel
+visualizations (PNG graphic + interactive HTML viewer).
+
+Public API:
+
+```python
+from run_merge_sweep import SweepTrial, DEFAULT_SWEEP_TRIALS, run_merge_sweep
+```
+
+### Predefined Demonstration Trials
+
+The default demonstration suite evaluates four forestry / remote sensing scenarios:
+
+| Trial | Name | Metrics | Thresholds | Output Stands | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Trial 1** | `all_standard` | All (6) | Global: 0.10 | 4 stands | Balanced multi-metric dissolve baseline |
+| **Trial 2** | `canopy_only` | `zq95` | Global: 0.10 | 4 stands | Tree height structure only |
+| **Trial 3** | `canopy_strict_vci` | `zq95`, `vci_1m` | ZQ95: 0.15, VCI: 0.03 | 6 stands | Relaxed canopy height + strict foliage density |
+| **Trial 4** | `strict_structural` | `zq95`, `vci_1m` | Global: 0.02 | 14 stands | High-sensitivity micro-stand clustering |
+
+### Running the Sweep Orchestrator
+
+```bash
+python run_merge_sweep.py --config merge_config.json
+```
+
+Output artifacts generated:
+- `sandbox/output/isi_mu780_postOBC_merge_sweep_verdummy_001.gdb`: Multi-layer sweep geodatabase.
+- `sandbox/output/sweep_summary.json`: JSON document detailing stand counts, metrics, tolerances, and runtimes.
+- `sandbox/output/sweep_visualization.png`: Extended 9-panel static figure (4 raw segmentation levels, Stage 1 intersected sub-polygons, and the 4 dissolved merge trials with metrics legend banners).
+- `sandbox/output/sweep_visualization.html`: Interactive SVG map with tab toggles for each trial and hover attribute cards displaying stand parameters and trial configuration.

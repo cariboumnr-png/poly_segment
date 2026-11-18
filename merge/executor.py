@@ -100,11 +100,6 @@ def run_merge(
                 destination,
             )
             return geopandas.read_file(destination, layer=layer_name)
-        if destination != config.source_dataset:
-            raise FileExistsError(
-                "Destination exists but does not contain expected output "
-                f"layer {layer_name!r}: {destination}. Use overwrite=True."
-            )
 
     # 1. obtain intersected polygons: chained from Stage 1 or fallback
     source_layer = config.source_intersection_layer
@@ -197,8 +192,9 @@ def _validate_environment(output_format: str) -> None:
 
     if output_format == "filegdb" and pyogrio.__gdal_version__ < (3, 6, 0):
         raise RuntimeError(
-            "File Geodatabase writing through OpenFileGDB requires GDAL >= 3.6; "
-            f"the installed version is {pyogrio.__gdal_version_string__}. "
+            "File Geodatabase writing through OpenFileGDB requires "
+            f"GDAL >= 3.6; installed version is "
+            f"{pyogrio.__gdal_version_string__}. "
             "Use output_format='geopackage' or upgrade GDAL/Pyogrio."
         )
 
@@ -257,7 +253,7 @@ def _write_outputs(
     try:
         # if destination already exists and contains other layers, copy
         # them to the temporary dataset first so they are preserved.
-        if destination.exists() and destination == source_dataset:
+        if destination.exists():
             other_layers = [
                 name for name, _ in pyogrio.list_layers(destination)
                 if name != layer_name
@@ -287,9 +283,12 @@ def _write_outputs(
 
         backup_path: pathlib.Path | None = None
         if destination.exists():
-            if not overwrite and destination != source_dataset:
+            existing_layers = [
+                name for name, _ in pyogrio.list_layers(destination)
+            ]
+            if not overwrite and layer_name in existing_layers:
                 raise FileExistsError(
-                    f"Destination already exists: {destination}. "
+                    f"Layer {layer_name!r} already exists in {destination}. "
                     "Use overwrite=True to replace it."
                 )
 

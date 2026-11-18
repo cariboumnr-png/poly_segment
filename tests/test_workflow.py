@@ -23,8 +23,8 @@
 Integration tests for the complete merge workflow.
 
 Validates end-to-end execution for File Geodatabase and GeoPackage
-outputs, as well as two-stage sequential execution chaining Stage 1
-intersection outputs directly into Stage 2 polygon merging.
+outputs, two-stage sequential execution, and multi-trial parameter
+sweeps with extended visualization artifacts.
 '''
 
 # standard imports
@@ -36,6 +36,9 @@ from intersect import WorkflowConfig as IntersectConfig
 from intersect import run_workflow as run_intersect
 from merge import MergeConfig
 from merge import run_merge
+from run_merge_sweep import DEFAULT_SWEEP_TRIALS
+from run_merge_sweep import SweepTrial
+from run_merge_sweep import run_merge_sweep
 
 
 # ----- test cases
@@ -264,3 +267,169 @@ def test_two_stage_sequential_workflow(
     layers_stage2 = {name for name, _ in pyogrio.list_layers(stage2_gdb)}
     assert merge_cfg.merged_layer in layers_stage2
     assert intersect_cfg.intersection_layer not in layers_stage2
+
+
+def test_merge_sweep_orchestrator(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate multi-trial merge parameter sweep execution.
+
+    Given:
+        A Stage 1 intersected dataset and custom sweep trials.
+    When:
+        `run_merge_sweep` executes over the array of parameter trials.
+    Then:
+        All trials produce valid merged stands in a single sweep GDB.
+    '''
+    tmp_dir, _ = synthetic_data
+    stage1_dest = tmp_dir / "sweep_stage1"
+
+    intersect_cfg = IntersectConfig(
+        mu=780,
+        source_folder=tmp_dir,
+        source_gdb_name="test_segmentation",
+        source_layer_prefix="segmented_objects",
+        object_level_merge=3,
+        destination_folder=stage1_dest,
+        gdb_version="swp_001",
+        table_version="swp_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+    run_intersect(intersect_cfg)
+
+    base_merge_cfg = MergeConfig(
+        mu=780,
+        source_folder=stage1_dest,
+        source_gdb_name="isi_mu780_postOBC_intersect_verswp_001",
+        source_layer=intersect_cfg.intersection_layer,
+        destination_folder=tmp_dir / "sweep_output",
+        gdb_version="swp_001",
+        layer_version="swp_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+
+    trials = (
+        SweepTrial(
+            name="test_std",
+            label="Trial 1 (Standard)",
+            description="All metrics with standard tolerance",
+            threshold=0.10,
+        ),
+        SweepTrial(
+            name="test_canopy",
+            label="Trial 2 (Canopy Only)",
+            description="Canopy height only",
+            threshold=0.10,
+            metrics=("zq95",),
+        ),
+        SweepTrial(
+            name="test_strict",
+            label="Trial 3 (Strict)",
+            description="Ultra-strict structural tolerance",
+            threshold=0.02,
+            metrics=("zq95", "vci_1m"),
+        ),
+    )
+
+    summary_file = tmp_dir / "sweep_output" / "test_summary.json"
+    result = run_merge_sweep(
+        base_config=base_merge_cfg,
+        trials=trials,
+        visualize=False,
+        output_summary_json=summary_file,
+    )
+
+    assert result["destination_dataset"].exists()
+    layers = [
+        name for name, _ in pyogrio.list_layers(result["destination_dataset"])
+    ]
+    for trial in trials:
+        expected_layer = f"merged_trial_{trial.name}"
+        assert expected_layer in layers
+        assert trial.name in result["trials"]
+        assert not result["trials"][trial.name].empty
+
+    assert summary_file.exists()
+    assert len(result["summary"]) == 3
+
+
+def test_merge_sweep_visualization_integration(
+    synthetic_data: tuple[pathlib.Path, pathlib.Path],
+) -> None:
+    '''
+    Validate extended multi-panel PNG and HTML viewer generation.
+
+    Given:
+        A Stage 1 intersected dataset and raw multi-scale layers.
+    When:
+        `run_merge_sweep` executes with `visualize=True`.
+    Then:
+        Both comparison PNG and interactive HTML files are created.
+    '''
+    tmp_dir, source_gdb = synthetic_data
+    stage1_dest = tmp_dir / "sweep_vis_stage1"
+
+    intersect_cfg = IntersectConfig(
+        mu=780,
+        source_folder=tmp_dir,
+        source_gdb_name="test_segmentation",
+        source_layer_prefix="segmented_objects",
+        object_level_merge=3,
+        destination_folder=stage1_dest,
+        gdb_version="vis_001",
+        table_version="vis_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+    run_intersect(intersect_cfg)
+
+    base_merge_cfg = MergeConfig(
+        mu=780,
+        source_folder=stage1_dest,
+        source_gdb_name="isi_mu780_postOBC_intersect_vervis_001",
+        source_layer=intersect_cfg.intersection_layer,
+        destination_folder=tmp_dir / "sweep_vis_output",
+        gdb_version="vis_001",
+        layer_version="vis_001",
+        output_format="filegdb",
+        overwrite=True,
+    )
+
+    out_png = tmp_dir / "sweep_vis_output" / "test_vis.png"
+    out_html = tmp_dir / "sweep_vis_output" / "test_vis.html"
+
+    trials = (
+        SweepTrial(
+            name="t1",
+            label="Trial 1",
+            description="Test trial 1",
+            threshold=0.10,
+        ),
+        SweepTrial(
+            name="t2",
+            label="Trial 2",
+            description="Test trial 2",
+            threshold=0.03,
+            metrics=("zq95", "vci_1m"),
+        ),
+    )
+
+    result = run_merge_sweep(
+        base_config=base_merge_cfg,
+        trials=trials,
+        visualize=True,
+        raw_source_gdb=source_gdb,
+        output_image=out_png,
+        output_html=out_html,
+    )
+
+    assert out_png.exists()
+    assert out_png.stat().st_size > 0
+    assert out_html.exists()
+    html_text = out_html.read_text(encoding="utf-8")
+    assert "Trial 1" in html_text
+    assert "Trial 2" in html_text
+    assert "<svg" in html_text
