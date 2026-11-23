@@ -1,3 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "postobc"
+version = "0.1.0"
+description = "Multi-scale polygon segmentation, intersection, and merge analysis."
+readme = "readme.md"
+requires-python = ">=3.12"
+dependencies = [
+    "geopandas>=0.14.0",
+    "matplotlib>=3.7.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "pyogrio>=0.7.0",
+    "pyproj>=3.5.0",
+    "shapely>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+postobc = "postobc.cli:main"
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 testpaths = ["tests"]

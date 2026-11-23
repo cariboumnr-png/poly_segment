@@ -46,7 +46,9 @@ pytest_cache/
 .pytest_cache/
 .mypy_cache/
 ruff_cache/
+.ruff_cache/
 *.pylintrc
+.pylintrc
 
 # Logs from tools / dev
 *.log

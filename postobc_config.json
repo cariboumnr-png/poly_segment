@@ -1,0 +1,39 @@
+{
+  "common": {
+    "mu": 780,
+    "output_format": "filegdb",
+    "overwrite": true,
+    "verbose": false
+  },
+  "intersect": {
+    "source_folder": "sandbox/input",
+    "source_gdb_name": "segmentation_R1",
+    "source_layer_prefix": "segmented_objects_R1",
+    "object_level_merge": 3,
+    "destination_folder": "sandbox/output",
+    "gdb_version": "dummy_001",
+    "table_version": "dummy_001"
+  },
+  "merge": {
+    "threshold": 0.10,
+    "metrics": [
+      "zq95",
+      "vci_1m",
+      "LMoment1",
+      "LMoment2",
+      "LMoment3",
+      "LMoment4"
+    ],
+    "per_metric_thresholds": null,
+    "min_shared_length": 0.0,
+    "destination_folder": "sandbox/output",
+    "gdb_version": "dummy_001",
+    "layer_version": "dummy_001"
+  },
+  "visual": {
+    "visualize": true,
+    "raw_gdb": "sandbox/input/segmentation_R1.gdb",
+    "output_image": "sandbox/output/e2e_visualization.png",
+    "output_html": "sandbox/output/e2e_visualization.html"
+  }
+}
